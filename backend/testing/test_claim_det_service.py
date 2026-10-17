@@ -1,4 +1,4 @@
-from app.services.claim_detection_service import ClaimDetectionService
+from backend.app.services.claim_detection_service import ClaimDetectionService
 
 
 def test_analyze():
