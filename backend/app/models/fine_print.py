@@ -13,6 +13,7 @@ class RiskCategory(str, Enum):
     RESTOCKING_FEE = "restocking_fee"
     CANCELLATION_TRAP = "cancellation_trap"
     WARRANTY_EXCLUSION = "warranty_exclusion"
+    DAMAGE_POLICY = "damage_policy"
     OTHER = "other"
 
 
@@ -43,12 +44,26 @@ class RiskFinding(BaseModel):
     source_url: HttpUrl
 
 
+class PriceWithTax(BaseModel):
+    """A listed price and the tax-inclusive amount when the page does not show it."""
+
+    listed_price: str = Field(min_length=1)
+    currency: str = Field(min_length=3, max_length=3)
+    tax_included: bool
+    price_with_tax: str | None = None
+    tax_rate: str | None = None
+    explanation: str = Field(min_length=1)
+    evidence_quotation: str = Field(min_length=1)
+    source_url: HttpUrl
+
+
 class FinePrintAnalysisResult(BaseModel):
-    """The outcome of analyzing one policy document."""
+    """Concerns and price details that are not already visible on the product page."""
 
     document: PolicyDocument
     findings: list[RiskFinding]
     analyzed_at: datetime
+    price: PriceWithTax | None = None
 
 
 class FinePrintExtraction(BaseModel):
