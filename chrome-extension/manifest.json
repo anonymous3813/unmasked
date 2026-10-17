@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Unmasked",
+  "version": "1.0.0",
+  "description": "Analyze product pages for hidden fine print.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}
