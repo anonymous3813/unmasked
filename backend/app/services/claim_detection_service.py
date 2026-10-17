@@ -1,19 +1,16 @@
-
 from pathlib import Path
 import re
 from trafilatura import fetch_url, extract
 
-class ClaimDetectionService:
-    def __init__(self, keywords_path: Path | None = None):
-        if keywords_path is None:
-            keywords_path = Path(__file__).parent.parent / "claim_words.txt"
 
+class ClaimDetectionService:
+    def __init__(self):
+        keywords_path = Path(__file__).parent.parent / "claim_words.md"
         self.keywords = self._load_keywords(keywords_path)
 
     @staticmethod
-    def _load_keywords(path: Path) -> dict[str, list[str]]:
-        keywords: dict[str, list[str]] = {}
-        category = None
+    def _load_keywords(path: Path) -> list[str]:
+        keywords = []
 
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -21,28 +18,22 @@ class ClaimDetectionService:
             if not line or line.startswith("#"):
                 continue
 
-            if line.startswith("[") and line.endswith("]"):
-                category = line[1:-1].lower()
-                keywords[category] = []
-            elif category is not None:
-                keywords[category].append(line)
+            keywords.append(line)
 
         return keywords
 
-    def find_matches(self, text: str, category: str) -> list[str]:
-        terms = self.keywords.get(category.lower(), [])
-
-        if not terms:
+    def find_matches(self, text: str) -> list[str]:
+        if not self.keywords:
             return []
 
         pattern = re.compile(
-            r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b",
+            r"\b(?:" + "|".join(re.escape(term) for term in self.keywords) + r")\b",
             re.IGNORECASE,
         )
 
         return [match.group() for match in pattern.finditer(text)]
 
-    def analyze_url(self, url: str, category: str) -> list[str]:
+    def analyze_url(self, url: str) -> list[str]:
         downloaded = fetch_url(url)
 
         if downloaded is None:
@@ -57,7 +48,4 @@ class ClaimDetectionService:
         if not text:
             raise RuntimeError(f"Failed to extract text from URL: {url}")
 
-        return self.find_matches(text, category)
-
-cds = ClaimDetectionService()
-print(cds.keywords)
+        return self.find_matches(text)

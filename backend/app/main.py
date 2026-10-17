@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-
+from app.services.claim_detection_service import ClaimDetectionService
 app = FastAPI()
 
 
@@ -9,4 +9,5 @@ async def root():
 
 @app.get("/analyze")
 async def analyze(Text: str):
-    return {"message": "todo"}
+    service = ClaimDetectionService
+    return { "result" : service.analyze_url(Text) }
