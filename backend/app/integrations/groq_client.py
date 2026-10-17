@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 
 class GroqClient:
@@ -20,6 +21,7 @@ class GroqClient:
 
     def complete(self, prompt: str) -> str:
         """Send one prompt to Groq and return the message text."""
+        _load_local_env()
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError("GROQ_API_KEY is not set")
@@ -57,3 +59,15 @@ class GroqClient:
         if not content.strip():
             raise RuntimeError("Groq returned an empty analysis")
         return content
+
+
+def _load_local_env() -> None:
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        name, value = stripped.split("=", 1)
+        os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))

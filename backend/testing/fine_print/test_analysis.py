@@ -97,20 +97,28 @@ def test_analyze_skips_the_tax_price_when_the_page_already_shows_it():
     assert result.price is None
 
 
-def test_env_file_supplies_azure_document_intelligence_settings(tmp_path, monkeypatch):
+def test_env_file_supplies_groq_settings(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
-    env_file.write_text(
-        'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT="https://example.cognitiveservices.azure.com"\n'
-        "AZURE_DOCUMENT_INTELLIGENCE_KEY=local-test-key\n",
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", raising=False)
-    monkeypatch.delenv("AZURE_DOCUMENT_INTELLIGENCE_KEY", raising=False)
+    env_file.write_text('GROQ_API_KEY="local-test-key"\n', encoding="utf-8")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
     _load_env_file(env_file)
 
-    assert (
-        os.environ["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"]
-        == "https://example.cognitiveservices.azure.com"
-    )
-    assert os.environ["AZURE_DOCUMENT_INTELLIGENCE_KEY"] == "local-test-key"
+    assert os.environ["GROQ_API_KEY"] == "local-test-key"
+
+
+def test_groq_reader_keeps_only_quotations_from_the_document():
+    from backend.app.services.fine_print.analysis import GroqFieldReader
+
+    text = "Opened items incur a 15% restocking fee."
+
+    def complete(prompt: str) -> str:
+        assert text in prompt
+        return (
+            '{"RestockingFee": "Opened items incur a 15% restocking fee.", '
+            '"ListedPrice": "$999"}'
+        )
+
+    fields = GroqFieldReader(complete=complete).analyze_document(text)
+
+    assert fields == {"RestockingFee": "Opened items incur a 15% restocking fee."}

@@ -1,17 +1,12 @@
 """Semantic risk analysis for extracted policy documents."""
 
-import base64
 import json
 import os
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from html import escape
 from pathlib import Path
 
+from backend.app.integrations.groq_client import GroqClient
 from backend.app.models.fine_print import (
     FinePrintAnalysisResult,
     FinePrintExtraction,
@@ -62,64 +57,30 @@ _TAX_INCLUDED_PHRASES = (
 )
 
 
-class AzureDocumentIntelligenceClient:
-    """Query-field analysis through Azure Document Intelligence.
+class GroqFieldReader:
+    """Read policy and price fields with Groq.
 
-    The layout model extracts the policy and price fields used by fine-print
-    analysis. Configure ``AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`` and
-    ``AZURE_DOCUMENT_INTELLIGENCE_KEY``.
+    Groq quotes return limits, fees, cancellation terms, warranty exclusions,
+    damage liability, the listed price, and any stated tax rate. Configure
+    ``GROQ_API_KEY`` in the environment or ``backend/.env``.
     """
 
-    endpoint_env = "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"
-    key_env = "AZURE_DOCUMENT_INTELLIGENCE_KEY"
-    api_version = "2024-11-30"
-    model_id = "prebuilt-layout"
+    def __init__(self, complete=None) -> None:
+        self._complete = complete
 
     def analyze_document(self, text: str) -> dict[str, str]:
-        """Extract semantic query fields from one document's text."""
-        _load_local_env()
-        endpoint = os.environ.get(self.endpoint_env, "").strip().rstrip("/")
-        key = os.environ.get(self.key_env)
-        if not endpoint or not key:
-            raise RuntimeError(
-                "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and "
-                "AZURE_DOCUMENT_INTELLIGENCE_KEY are required"
-            )
-
-        html = f"<html><body><pre>{escape(text)}</pre></body></html>".encode()
-        body = json.dumps(
-            {"base64Source": base64.b64encode(html).decode("ascii")}
-        ).encode()
-        query = urllib.parse.urlencode(
-            {
-                "_overload": "analyzeDocument",
-                "api-version": self.api_version,
-                "features": "queryFields",
-                "queryFields": ",".join(_QUERY_FIELDS),
-            }
-        )
-        url = (
-            f"{endpoint}/documentintelligence/documentModels/"
-            f"{self.model_id}:analyze?{query}"
-        )
-        status, headers, _payload = _azure_request(url, key, body, "POST")
-        if status != 202:
-            raise RuntimeError(
-                f"Azure Document Intelligence request failed with status {status}"
-            )
-        operation = headers.get("Operation-Location")
-        if not operation:
-            raise RuntimeError("Azure Document Intelligence did not return a result URL")
-        return _query_field_values(_poll_result(operation, key))
+        """Return exact quotations for the fine-print fields found in one text."""
+        complete = self._complete or GroqClient().complete
+        return _fields_from_response(complete(_field_prompt(text)), text)
 
 
 class FinePrintAnalyzer:
     """Find policy concerns and the tax-inclusive price the product page hides.
 
-    Azure Document Intelligence reads each extracted document for return
-    limits, fees, cancellation terms, warranty exclusions, damage liability,
-    the listed price, and any stated tax rate. A concern is kept only when
-    its quotation is in the source text and is not already on the product page.
+    Groq reads each extracted document for return limits, fees, cancellation
+    terms, warranty exclusions, damage liability, the listed price, and any
+    stated tax rate. A concern is kept only when its quotation is in the
+    source text and is not already on the product page.
     """
 
     def __init__(self, analyze_document=None) -> None:
@@ -127,9 +88,7 @@ class FinePrintAnalyzer:
 
     def analyze(self, extraction: FinePrintExtraction) -> FinePrintAnalysisResult:
         """Return buried policy concerns and the tax-inclusive price."""
-        analyze_document = (
-            self._analyze_document or AzureDocumentIntelligenceClient().analyze_document
-        )
+        analyze_document = self._analyze_document or GroqFieldReader().analyze_document
         fields = _collected_fields(extraction, analyze_document)
         return FinePrintAnalysisResult(
             document=PolicyDocument(
@@ -224,17 +183,36 @@ def _price(fields: list[tuple[str, str, str]], page_text: str) -> PriceWithTax |
     )
 
 
-def _load_local_env() -> None:
-    """Load backend/.env without overriding variables already set in the shell."""
-    env_path = Path(__file__).resolve().parents[3] / ".env"
-    if not env_path.is_file():
-        return
+def _field_prompt(text: str) -> str:
+    names = ", ".join(_QUERY_FIELDS)
+    return (
+        "Extract fine-print fields from the document. "
+        f"Use only these keys: {names}. "
+        "Each value must be an exact contiguous quotation from the document, "
+        "or an empty string when the field is absent. Do not invent text.\n"
+        'Return JSON like {"RestockingFee": "exact quote", "ListedPrice": "$120"}.\n\n'
+        f"Document:\n{text}"
+    )
+
+
+def _fields_from_response(raw: str, source_text: str) -> dict[str, str]:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end <= start:
+        return {}
     try:
-        from dotenv import load_dotenv
-    except ImportError:
-        _load_env_file(env_path)
-        return
-    load_dotenv(env_path, override=False)
+        payload = json.loads(raw[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    fields: dict[str, str] = {}
+    normalized_source = _normalize(source_text)
+    for name in _QUERY_FIELDS:
+        quotation = str(payload.get(name) or "").strip()
+        if quotation and _normalize(quotation) in normalized_source:
+            fields[name] = quotation
+    return fields
 
 
 def _load_env_file(path: Path) -> None:
@@ -244,46 +222,6 @@ def _load_env_file(path: Path) -> None:
             continue
         name, value = stripped.split("=", 1)
         os.environ.setdefault(name.strip(), value.strip().strip('"').strip("'"))
-
-
-def _poll_result(operation_url: str, key: str) -> dict:
-    for _attempt in range(20):
-        _status, headers, payload = _azure_request(operation_url, key, None, "GET")
-        if payload.get("status") == "succeeded":
-            return payload
-        if payload.get("status") == "failed":
-            raise RuntimeError("Azure Document Intelligence analysis failed")
-        retry_after = headers.get("Retry-After")
-        time.sleep(float(retry_after) if retry_after else 2)
-    raise RuntimeError("Azure Document Intelligence analysis timed out")
-
-
-def _query_field_values(payload: dict) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for document in (payload.get("analyzeResult") or {}).get("documents") or []:
-        for name, field in (document.get("fields") or {}).items():
-            if not isinstance(field, dict):
-                continue
-            content = field.get("content") or field.get("valueString") or ""
-            if isinstance(content, str) and content.strip():
-                values[name] = content.strip()
-    return values
-
-
-def _azure_request(url: str, key: str, body: bytes | None, method: str) -> tuple[int, dict, dict]:
-    headers = {"Ocp-Apim-Subscription-Key": key}
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            raw = response.read()
-            parsed = json.loads(raw.decode()) if raw else {}
-            return response.status, dict(response.headers), parsed
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(
-            f"Azure Document Intelligence request failed with status {exc.code}"
-        ) from exc
 
 
 def _already_visible(quotation: str, page_text: str) -> bool:
