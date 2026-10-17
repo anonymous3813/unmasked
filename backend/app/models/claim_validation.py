@@ -15,11 +15,12 @@ class ClaimVerdict(str, Enum):
 
 
 class ProductClaim(BaseModel):
-    """A product claim received from the existing extraction pipeline."""
+    """A claim the seller makes about a product."""
 
     claim_text: str = Field(min_length=1)
     product_name: str = Field(min_length=1)
     source_url: HttpUrl
+    category: str | None = None
 
 
 class ClaimEvidence(BaseModel):
