@@ -49,3 +49,12 @@ class FinePrintAnalysisResult(BaseModel):
     document: PolicyDocument
     findings: list[RiskFinding]
     analyzed_at: datetime
+
+
+class FinePrintExtraction(BaseModel):
+    """Product details and the policy documents found from one page."""
+
+    source_url: HttpUrl
+    page_text: str = Field(min_length=1)
+    documents: list[PolicyDocument]
+    retrieved_at: datetime

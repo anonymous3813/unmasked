@@ -8,6 +8,7 @@ from backend.app.models.claim_validation import (
 )
 from backend.app.models.fine_print import (
     FinePrintAnalysisResult,
+    FinePrintExtraction,
     PolicyDocument,
     RiskCategory,
     RiskFinding,
@@ -19,6 +20,7 @@ __all__ = [
     "ClaimValidationResult",
     "ClaimVerdict",
     "FinePrintAnalysisResult",
+    "FinePrintExtraction",
     "PolicyDocument",
     "ProductClaim",
     "RiskCategory",
