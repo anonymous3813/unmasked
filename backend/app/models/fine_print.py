@@ -73,3 +73,22 @@ class FinePrintExtraction(BaseModel):
     page_text: str = Field(min_length=1)
     documents: list[PolicyDocument]
     retrieved_at: datetime
+
+
+class NotificationKind(str, Enum):
+    """What a shopper notification is about."""
+
+    CONCERN = "concern"
+    PRICE = "price"
+    PRODUCT_INFO = "product_info"
+
+
+class ProductNotification(BaseModel):
+    """One piece of product information to show the shopper."""
+
+    kind: NotificationKind
+    title: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    source_url: HttpUrl
+    created_at: datetime
+    severity: Severity | None = None
