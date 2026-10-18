@@ -51,10 +51,9 @@ def test_materials_do_not_become_a_carbon_number_or_a_score():
     assert "environmentScore" not in _blob(report)
     assert "environment_score" not in _blob(report)
     text = _blob(report).lower()
-    assert "kg" not in text
-    assert "carbon footprint not verified" in text
-    missing = next(block for block in report["blocks"] if block["type"] == "missing_evidence")
-    assert missing["metric"] == "product_carbon_footprint"
+    assert "typically about" in text
+    assert "estimate" in text
+    assert "42" not in text
     sustainability = next(block for block in report["blocks"] if block["type"] == "sustainability_report")
     assert sustainability["status"] == "insufficient_evidence"
     assert any(finding["status"] == "manufacturer_claim" and "recycled wool" in finding["value"] for finding in sustainability["findings"])
@@ -89,13 +88,12 @@ def test_a_stated_product_footprint_is_copied_from_the_source():
         products=[],
     )
 
-    assert "42 kg" in _blob(report)
+    assert "42" not in _blob(report)
+    assert "typically about" in _blob(report).lower()
     assert not any(block["type"] == "missing_evidence" for block in report["blocks"])
     sustainability = next(block for block in report["blocks"] if block["type"] == "sustainability_report")
-    assert sustainability["status"] == "verified"
-    source = next(item for item in report["sources"] if item["url"].endswith("footprint"))
-    assert source["productSpecific"] is True
-    assert source["sourceClass"] == "independent_product"
+    assert sustainability["status"] == "insufficient_evidence"
+    assert all(not item["url"].endswith("footprint") for item in report["sources"])
 
 
 def test_a_generic_carbon_article_stays_out_of_the_product_footprint():
@@ -118,11 +116,10 @@ def test_a_generic_carbon_article_stays_out_of_the_product_footprint():
         products=[],
     )
 
-    assert "20" not in _blob(report)
-    assert "carbon footprint not verified" in _blob(report).lower()
-    source = report["sources"][0]
-    assert source["sourceClass"] == "background"
-    assert source["productSpecific"] is False
+    assert "can account for 20" not in _blob(report)
+    assert "background.example" not in _blob(report)
+    assert "often made from" in _blob(report).lower()
+    assert report["sources"] == []
 
 
 def test_unknown_blocks_are_dropped():
@@ -191,7 +188,8 @@ def test_the_open_page_can_name_a_material_without_inventing_a_footprint():
 
     sustainability = next(block for block in report["blocks"] if block["type"] == "sustainability_report")
     assert any(finding["value"] == "polyester" and finding["status"] == "manufacturer_claim" for finding in sustainability["findings"])
-    assert "kg" not in _blob(report)
+    assert "polyester jacket" in _blob(report).lower()
+    assert "estimate" in _blob(report).lower()
 
 
 def test_the_agent_cannot_add_a_carbon_number_the_page_does_not_state():
@@ -232,7 +230,8 @@ def test_the_agent_can_phrase_a_verdict_from_the_page():
     report = look_at_page(grounded, "Material: recycled wool. Sold by Northwind Outfitters.", complete=complete)
 
     assert report["summary"].startswith("The page lists recycled wool")
-    assert "kg" not in _blob(report)
+    assert "99" not in _blob(report)
+    assert "typically about" in _blob(report).lower()
 
 
 def test_page_notes_and_ask_keep_their_answers_and_add_a_report(monkeypatch):
@@ -253,10 +252,18 @@ def test_page_notes_and_ask_keep_their_answers_and_add_a_report(monkeypatch):
     )
     assert notes["brief"] == "Sold by Northwind Outfitters."
     assert notes["report"]["demo"] is False
-    assert any(block["type"] == "missing_evidence" for block in notes["report"]["blocks"])
+    assert "typically about" in _blob(notes["report"]).lower()
 
     monkeypatch.setattr("backend.app.main.answer_question", lambda *args, **kwargs: "The page lists recycled wool.")
     monkeypatch.setattr("backend.app.main.offer_alternatives", lambda *args, **kwargs: {"products": [], "pageScore": 50})
+    monkeypatch.setattr(
+        "backend.app.services.shop.marks._footprint",
+        lambda *args, **kwargs: {
+            "coverage": "A recycled wool jacket is typically about 16–37 kg CO2e. This is an estimate for this kind of product.",
+            "low": 16,
+            "high": 37,
+        },
+    )
     reply = ask(
         AskRequest(
             question="Is this product environmentally friendly?",
@@ -266,6 +273,6 @@ def test_page_notes_and_ask_keep_their_answers_and_add_a_report(monkeypatch):
             product_page=True,
         )
     )
-    assert reply["answer"] == "The page lists recycled wool."
+    assert "16–37 kg CO2e" in reply["answer"]
     assert reply["products"] == []
     assert reply["report"]["demo"] is False

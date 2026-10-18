@@ -9,9 +9,13 @@ from backend.app.services.shop.cart import contact, orders_answer
 _CART = re.compile(r"\bcart\b", re.IGNORECASE)
 
 
-def inbox(shopper=None) -> dict:
-    """Return the assistant's messages, calls, and orders."""
-    profile = (shopper or contact()).profile("shopper")
+def inbox(shopper=None, user_id: str = "shopper") -> dict:
+    """Return this shopper's messages, calls, and orders."""
+    shopper = shopper or contact()
+    try:
+        profile = shopper.profile(user_id)
+    except KeyError:
+        return {"messages": [], "calls": [], "orders": []}
     return {
         "messages": [
             {"role": message.role.value, "body": message.body}
@@ -36,39 +40,40 @@ def send_message(
     shopper=None,
     complete=None,
     notes: list | None = None,
+    user_id: str = "shopper",
 ) -> dict:
     """Save a message and answer it from the cart, orders, and page annotations."""
     shopper = shopper or contact()
-    _ready(shopper)
-    shopper.record_message("shopper", MessageRole.USER, text.strip(), ContactPurpose.FINE_PRINT)
-    answer = _reply(text, cart or [], shopper, complete, notes or [])
-    shopper.record_message("shopper", MessageRole.AGENT, answer, ContactPurpose.FINE_PRINT)
-    return {"answer": answer, "inbox": inbox(shopper)}
+    _ready(shopper, user_id)
+    shopper.record_message(user_id, MessageRole.USER, text.strip(), ContactPurpose.FINE_PRINT)
+    answer = _reply(text, cart or [], shopper, complete, notes or [], user_id)
+    shopper.record_message(user_id, MessageRole.AGENT, answer, ContactPurpose.FINE_PRINT)
+    return {"answer": answer, "inbox": inbox(shopper, user_id)}
 
 
-def place_call(cart: list | None = None, shopper=None, notes: list | None = None) -> dict:
+def place_call(cart: list | None = None, shopper=None, notes: list | None = None, user_id: str = "shopper") -> dict:
     """Call the assistant about the cart, orders, and page annotations."""
     shopper = shopper or contact()
-    _ready(shopper)
-    summary = _brief(cart or [], shopper, notes or [])
-    call = shopper.place_call("shopper", ContactPurpose.FINE_PRINT, summary)
-    return {"summary": call.summary, "inbox": inbox(shopper)}
+    _ready(shopper, user_id)
+    summary = _brief(cart or [], shopper, notes or [], user_id)
+    call = shopper.place_call(user_id, ContactPurpose.FINE_PRINT, summary)
+    return {"summary": call.summary, "inbox": inbox(shopper, user_id)}
 
 
-def _ready(shopper) -> None:
+def _ready(shopper, user_id: str) -> None:
     try:
-        shopper.profile("shopper")
+        shopper.profile(user_id)
     except KeyError:
-        shopper.open_profile("shopper", "+1 415 555 0199")
+        shopper.open_profile(user_id, "+1 415 555 0199")
 
 
-def _reply(text: str, cart: list, shopper, complete, notes: list) -> str:
+def _reply(text: str, cart: list, shopper, complete, notes: list, user_id: str) -> str:
     if _CART.search(text or ""):
         return _cart_line(cart)
-    remembered = orders_answer(text, shopper)
+    remembered = orders_answer(text, shopper, user_id)
     if remembered is not None:
         return remembered
-    orders = _order_line(shopper)
+    orders = _order_line(shopper, user_id)
     context = f"Cart: {_cart_line(cart)}\nOrders: {orders}\nAnnotations: {_notes_line(notes)}"
     try:
         return answer_question(
@@ -86,8 +91,8 @@ def _reply(text: str, cart: list, shopper, complete, notes: list) -> str:
         )
 
 
-def _brief(cart: list, shopper, notes: list) -> str:
-    summary = f"{_cart_line(cart)} {orders_answer('what are my orders', shopper)}"
+def _brief(cart: list, shopper, notes: list, user_id: str) -> str:
+    summary = f"{_cart_line(cart)} {orders_answer('what are my orders', shopper, user_id)}"
     annotations = _notes_line(notes)
     if not annotations:
         return summary
@@ -116,5 +121,5 @@ def _cart_line(cart: list) -> str:
     return f"In your cart: {items}."
 
 
-def _order_line(shopper) -> str:
-    return orders_answer("what are my orders", shopper) or "No orders yet."
+def _order_line(shopper, user_id: str) -> str:
+    return orders_answer("what are my orders", shopper, user_id) or "No orders yet."

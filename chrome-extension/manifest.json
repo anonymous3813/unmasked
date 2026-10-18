@@ -1,10 +1,29 @@
 {
   "manifest_version": 3,
   "name": "Unmasked",
-  "version": "1.0.0",
-  "description": "Analyze product pages for hidden fine print.",
+  "version": "1.5.5",
+  "description": "Analyze product pages for hidden fine print. Sign in with your Unmasked account so orders and recommendations stay private.",
+  "icons": {
+    "16": "icons/logo-16.png",
+    "48": "icons/logo-48.png",
+    "128": "icons/logo-128.png"
+  },
+  "action": {
+    "default_title": "Unmasked",
+    "default_icon": {
+      "16": "icons/logo-16.png",
+      "48": "icons/logo-48.png",
+      "128": "icons/logo-128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/logo.jpeg"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://127.0.0.1:8000/*"],
+  "host_permissions": ["https://unmasked.fastapicloud.dev/*"],
   "background": {
     "service_worker": "src/background.js"
   },

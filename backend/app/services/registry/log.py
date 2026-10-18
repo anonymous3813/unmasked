@@ -1,8 +1,11 @@
 """Activity the shopping agent has already recorded."""
 
+import re
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 _KINDS = ("page", "ask", "message", "call", "order", "intro")
+_PRIVATE_KINDS = {"message", "call", "order", "intro"}
 _entries: list[dict] = []
 
 
@@ -34,8 +37,30 @@ def record(kind: str, title: str, detail: str = "", url: str = "") -> dict:
     return entry
 
 
+def for_product(url: str, name: str = "") -> list[dict]:
+    """Return public registry rows for this product page."""
+    wanted = _url_key(url)
+    label = " ".join(str(name or "").split())
+    matched = []
+    for entry in _public_entries():
+        same_page = bool(wanted) and _url_key(str(entry.get("url") or "")) == wanted
+        if same_page or _name_hit(label, entry):
+            matched.append(
+                {
+                    "id": entry.get("id") or "",
+                    "kind": entry.get("kind") or "",
+                    "title": entry.get("title") or "",
+                    "detail": entry.get("detail") or "",
+                    "url": entry.get("url") or "",
+                    "at": entry.get("at") or "",
+                }
+            )
+    matched.sort(key=lambda item: item["at"], reverse=True)
+    return matched[:6]
+
+
 def snapshot() -> dict:
-    """Return the newest agent actions, including messages, calls, and orders."""
+    """Return public product findings. Orders, messages, and calls stay on the signed-in account."""
     from backend.app.integrations.supabase_store import load_entries
 
     stored = load_entries()
@@ -45,7 +70,7 @@ def snapshot() -> dict:
         if current and current.get("ballot"):
             continue
         by_id[entry["id"]] = entry
-    entries = [*by_id.values(), *_profile_entries()]
+    entries = [entry for entry in by_id.values() if entry.get("kind") not in _PRIVATE_KINDS]
     entries.sort(key=lambda item: item["at"], reverse=True)
     counts = {kind: 0 for kind in _KINDS}
     for entry in entries:
@@ -53,35 +78,41 @@ def snapshot() -> dict:
     return {"entries": entries[:200], "counts": counts}
 
 
-def _profile_entries() -> list[dict]:
-    from backend.app.services.shop.cart import contact
+def _public_entries() -> list[dict]:
+    """Read the public registry from Supabase, and keep any row still only in memory."""
+    from backend.app.integrations.supabase_store import load_entries
 
-    try:
-        profile = contact().profile("shopper")
-    except KeyError:
-        return []
-    rows = []
-    for message in profile.messages:
-        speaker = "You" if message.role.value == "user" else "Your Online Assistant"
-        rows.append(_row("message", speaker, message.body, message.created_at))
-    for call in profile.calls:
-        rows.append(_row("call", "Call", call.summary, call.created_at))
-    for order in profile.orders:
-        price = f"${order.price}" if order.price and not str(order.price).startswith("$") else order.price
-        parts = [part for part in (order.store, price, order.order_id) if part]
-        rows.append(_row("order", order.product_name, " · ".join(parts), order.ordered_at, str(order.product_url)))
+    stored = load_entries()
+    rows = [entry for entry in (list(_entries) if stored is None else list(stored)) if entry.get("kind") not in _PRIVATE_KINDS]
+    seen = {str(entry.get("id") or "") for entry in rows}
+    if stored is not None:
+        for entry in _entries:
+            if entry.get("kind") in _PRIVATE_KINDS:
+                continue
+            if str(entry.get("id") or "") not in seen:
+                rows.append(entry)
     return rows
 
 
-def _row(kind: str, title: str, detail: str, at: datetime, url: str = "") -> dict:
-    return {
-        "id": f"{kind}-{at.timestamp():.0f}-{abs(hash(detail)) % 100000}",
-        "kind": kind,
-        "title": _clip(title, 160) or "Agent activity",
-        "detail": _clip(detail, 280),
-        "url": url,
-        "at": at.isoformat(),
-    }
+def _url_key(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    host = parsed.netloc.lower().removeprefix("www.")
+    path = (parsed.path or "").rstrip("/")
+    if not host:
+        return ""
+    return f"{host}{path}"
+
+
+def _name_hit(name: str, entry: dict) -> bool:
+    words = [
+        word
+        for word in re.findall(r"[a-z0-9]+", name.lower())
+        if len(word) > 3 and word not in {"with", "from", "this", "that", "pack"}
+    ]
+    if len(words) < 2:
+        return False
+    blob = f"{entry.get('title') or ''} {entry.get('detail') or ''}".lower()
+    return sum(1 for word in words[:4] if word in blob) >= 2
 
 
 def _clip(value: str, limit: int) -> str:

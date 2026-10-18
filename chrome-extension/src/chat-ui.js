@@ -11,7 +11,7 @@
 
     return h(
       "div",
-      { className: "dock" },
+      { className: "dock" + (state.open ? " open" : "") },
       state.open
         ? h(Panel, { state, actions, threadRef })
         : h(
@@ -29,35 +29,145 @@
   }
 
   function Panel({ state, actions, threadRef }) {
-    const pages = state.reading ? [] : collectPages(state, actions);
-    const [index, setIndex] = React.useState(0);
-    const signature = pages.map((page) => page.id).join("|");
+    const [view, setView] = React.useState("discover");
     const seenMessages = React.useRef(0);
     React.useEffect(() => {
-      setIndex((current) => Math.max(0, Math.min(current, Math.max(pages.length - 1, 0))));
-    }, [signature]);
-    React.useEffect(() => {
-      if (seenMessages.current && state.messages.length > seenMessages.current) {
-        const chat = pages.findIndex((page) => page.id === "chat");
-        if (chat >= 0) setIndex(chat);
-      }
+      if (seenMessages.current && state.messages.length > seenMessages.current) setView("ask");
       seenMessages.current = state.messages.length;
-    }, [state.messages.length, signature]);
-    const page = pages[index] || null;
+    }, [state.messages.length]);
+    let body = h(Discover, { state: state, actions: actions });
+    if (!state.account) body = h(AccountGate, { state: state, actions: actions });
+    else if (view === "compare") body = h(Compare, { state: state, actions: actions });
+    else if (view === "ask") body = h(Ask, { state: state, actions: actions });
     return h(
       "section",
-      { className: "panel" + (state.expanded ? " expanded" : "") + (state.reading ? " reading" : ""), "aria-label": "Unmasked shopping agent" },
-      h(Header, { state, actions }),
-      pages.length > 1 ? h(Pager, { page: page, index: index, count: pages.length, onPrevious: () => setIndex(index - 1), onNext: () => setIndex(index + 1) }) : null,
-      h(
-        "div",
-        { className: "stage", ref: threadRef },
-        state.reading ? h(Reading, { state }) : page ? page.body : null
-      ),
-      state.cartOpen ? h(CartSheet, { state, actions }) : null,
-      state.menu ? h(MenuSheet, { state, actions }) : null,
+      { className: "panel side" + (state.expanded ? " expanded" : "") + (state.reading ? " reading" : ""), "aria-label": "Unmasked shopping agent" },
+      h(Header, { state: state, actions: actions }),
+      state.reading || !state.account ? null : h(ViewNav, { view: view, onChoose: setView }),
+      h("div", { className: "stage", ref: threadRef }, state.reading ? h(Reading, { state: state }) : body),
+      state.cartOpen ? h(CartSheet, { state: state, actions: actions }) : null,
+      state.menu ? h(MenuSheet, { state: state, actions: actions }) : null,
       state.call ? h(CallSheet, { call: state.call, onHangUp: actions.hangUp }) : null,
-      state.reading ? null : h(Composer, { placeholder: state.inboxMode ? "Message your assistant" : "Message Unmasked", onSend: actions.send })
+      state.reading || !state.account || view !== "ask" ? null : h(Composer, { placeholder: state.inboxMode ? "Message your assistant" : "Ask about this product", onSend: actions.send })
+    );
+  }
+
+  function AccountGate({ state, actions }) {
+    return h(
+      "form",
+      {
+        className: "login",
+        onSubmit: (event) => {
+          event.preventDefault();
+          const data = new FormData(event.target);
+          actions.signIn({
+            mode: state.authMode || "login",
+            email: data.get("email"),
+            password: data.get("password"),
+            name: data.get("name") || "",
+            phone: data.get("phone") || "",
+          });
+        },
+      },
+      h("h2", null, state.authMode === "register" ? "Create your account" : "Sign in"),
+      h("p", { className: "hero" }, "Orders, the wishlist, and similar products stay with this account. The public registry does not."),
+      state.authMode === "register" ? h("input", { name: "name", placeholder: "Name", autoComplete: "name", required: true }) : null,
+      h("input", { name: "email", type: "email", placeholder: "Email", autoComplete: "email", required: true }),
+      h("input", { name: "password", type: "password", placeholder: "Password", autoComplete: state.authMode === "register" ? "new-password" : "current-password", required: true, minLength: 8 }),
+      h("input", { name: "phone", type: "tel", placeholder: "Mobile number for texts", autoComplete: "tel", required: true }),
+      state.authError ? h("p", { className: "activity" }, state.authError) : null,
+      h("button", { type: "submit" }, state.authMode === "register" ? "Create account" : "Log in"),
+      h(
+        "button",
+        { type: "button", onClick: actions.toggleAuthMode },
+        state.authMode === "register" ? "I already have an account" : "Create an account"
+      )
+    );
+  }
+
+  function ViewNav({ view, onChoose }) {
+    const tabs = [
+      ["discover", "Discover"],
+      ["compare", "Compare"],
+      ["ask", "Ask AI"],
+    ];
+    return h(
+      "nav",
+      { className: "views", "aria-label": "Shopping views" },
+      tabs.map((tab) =>
+        h(
+          "button",
+          {
+            key: tab[0],
+            type: "button",
+            "aria-pressed": view === tab[0] ? "true" : "false",
+            onClick: () => onChoose(tab[0]),
+          },
+          tab[1]
+        )
+      )
+    );
+  }
+
+  function Discover({ state, actions }) {
+    const product = state.pageProduct && state.pageProduct.name ? state.pageProduct : null;
+    const policies = h(PolicyConcerns, { state: state });
+    const footprint = h(Footprint, { footprint: state.footprint });
+    const registry = h(RegistryNotes, { entries: state.registry });
+    const reviews = h(ReviewPage, { state: state });
+    return h(
+      "div",
+      { className: "page" },
+      h(Welcome, { state: state }),
+      product ? h(ProductRail, { products: [product], onAdd: actions.addToCart, stacked: true }) : null,
+      policies,
+      footprint,
+      registry,
+      reviews
+    );
+  }
+
+  function Compare({ state, actions }) {
+    const products = (state.products || []).filter((product) => product && product.name && /^https?:/i.test(String(product.url || "")));
+    const taste = state.taste || {};
+    const kept = [].concat(taste.brands || [], taste.colors || []).filter(Boolean);
+    const note = state.compareNote || (products.length
+      ? "These are the same kind of product as the one on this page."
+      : "No other-store listing was retrieved for this kind of product.");
+    return h(
+      "div",
+      { className: "page" },
+      h(
+        "article",
+        { className: "section-page visual" },
+        h("h2", null, "Is there a better product?"),
+        kept.length ? h("p", { className: "hero" }, "Based on what you kept: " + kept.join(", ") + ".") : null,
+        h("p", { className: "hero" }, note),
+        products.length ? h(ProductRail, { products: products, onAdd: actions.addToCart, onWishlist: actions.wishlist, stacked: true }) : null
+      )
+    );
+  }
+
+  function Ask({ state, actions }) {
+    return h(
+      "div",
+      { className: "page" },
+      state.messages.map((message) =>
+        h(Message, {
+          key: message.id,
+          message: message,
+          open: Boolean(state.evidenceOpen[message.id]),
+          onToggle: () => actions.toggleEvidence(message.id),
+          report: message.report,
+          state: state,
+          actions: actions,
+        })
+      ),
+      state.activity ? h("p", { className: "activity", role: "status" }, state.activity) : null,
+      h(Suggestions, { suggestions: state.suggestions, onPick: actions.send }),
+      state.report && state.report.suggestedActions && state.report.suggestedActions.length
+        ? h(ActionList, { actions: state.report.suggestedActions, state: state, run: actions })
+        : null
     );
   }
 
@@ -124,9 +234,9 @@
             "article",
             { className: "section-page visual" },
             h("h2", null, "Similar products"),
-            state.products.length
-              ? h(ProductRail, { products: state.products, onAdd: actions.addToCart, onWishlist: actions.wishlist, stacked: true })
-              : h("p", { className: "hero" }, "No similar product was found for the one on this page.")
+            (state.products || []).filter(pictured).length
+              ? h(ProductRail, { products: (state.products || []).filter(pictured), onAdd: actions.addToCart, onWishlist: actions.wishlist, stacked: true })
+              : null
           )
         ),
       },
@@ -179,10 +289,10 @@
   function policyConcerns(state) {
     const rows = [];
     const seen = new Set();
-    function add(label, text, source) {
+    function add(label, text, source, retrieved) {
       const clean = String(text || "").replace(/\s+/g, " ").trim();
-      if (clean.length < 20 || seen.has(clean) || /does not state a|no .+ sentence on this page/i.test(clean)) return;
-      if (!CONCERN.test(clean)) return;
+      if (clean.length < 20 || seen.has(clean) || /does not state a|no .+ sentence on this page|\$\{|cardName|keyboard shortcut|product summary presents/i.test(clean)) return;
+      if (!retrieved && !CONCERN.test(clean)) return;
       seen.add(clean);
       rows.push({ label: label || "Policy", text: clean, source: source || "" });
     }
@@ -192,7 +302,7 @@
       (bar.points || []).forEach((point) => add(bar.label, point, "This page"));
     });
     (((state.outside || {}).policies) || []).forEach((policy) => {
-      add(/return|refund/i.test(policy.title || policy.text || "") ? "Returns" : "Other policy", policy.text, policy.url || "");
+      add(/return|refund/i.test(policy.title || policy.text || "") ? "Returns" : "Other policy", policy.text, policy.url || "", true);
     });
     (((state.dossier || {}).documents) || []).forEach((document) => {
       const label = /return|refund/i.test((document.title || "") + (document.excerpt || "")) ? "Returns" : "Other policy";
@@ -203,21 +313,23 @@
 
   function PolicyConcerns({ state }) {
     const rows = policyConcerns(state);
+    if (!rows.length) {
+      const note = ((state.outside || {}).coverage || {}).policies || "No return or warranty passage was retrieved from this page or from other sites.";
+      return h("article", { className: "section-page visual" }, h("h2", null, "Policy concerns"), h("p", { className: "hero" }, note));
+    }
     return h(
       "article",
       { className: "section-page visual" },
       h("h2", null, "Policy concerns"),
-      rows.length
-        ? rows.map((row) =>
-            h(
-              "article",
-              { className: "concern", key: row.label + row.text },
-              h("span", null, row.label),
-              h("p", null, row.text),
-              row.source ? h("em", null, row.source) : null
-            )
-          )
-        : h("p", { className: "hero" }, "No return or policy concern was found in the pages that were retrieved.")
+      rows.map((row) =>
+        h(
+          "article",
+          { className: "concern", key: row.label + row.text },
+          h("span", null, row.label),
+          h("p", null, row.text),
+          row.source ? h("em", null, row.source) : null
+        )
+      )
     );
   }
 
@@ -235,14 +347,33 @@
     return "";
   }
 
-  function Footprint({ figure }) {
-    const verified = Boolean(figure);
+  function RegistryNotes({ entries }) {
+    if (!Array.isArray(entries) || !entries.length) return null;
+    return h(
+      "article",
+      { className: "section-page" },
+      h("h2", null, "Public registry"),
+      entries.map((entry) =>
+        h(
+          "p",
+          { key: entry.id || entry.title },
+          h("strong", null, entry.title || "Earlier finding"),
+          entry.detail ? " " + entry.detail : ""
+        )
+      )
+    );
+  }
+
+  function Footprint({ footprint, figure }) {
+    const estimate = footprint || {};
+    const verified = Boolean((estimate.low && estimate.high) || figure);
+    const label = estimate.coverage || estimate.productHeadline || estimate.headline || figure || "Product carbon footprint not independently verified.";
     return h(
       "article",
       { className: "section-page visual" },
       h(
         "div",
-        { className: "footprint " + (verified ? "verified" : "open"), role: "img", "aria-label": verified ? "Carbon footprint " + figure : "Carbon footprint not verified" },
+        { className: "footprint " + (verified ? "verified" : "open"), role: "img", "aria-label": label },
         h(
           "svg",
           { viewBox: "0 0 160 210", "aria-hidden": "true" },
@@ -254,9 +385,16 @@
           h("path", { d: "M48 86c-20 12-28 40-20 74 8 32 34 46 56 40 24-6 40-30 36-62-4-34-22-54-42-60-8-3-20 0-30 8z" })
         )
       ),
-      h("p", { className: "foot-figure" }, verified ? figure : "—"),
-      h("h2", null, "Carbon footprint"),
-      h("p", { className: "hero" }, verified ? "A source that names this product states " + figure + "." : "Carbon footprint not verified.")
+      h("p", { className: "foot-figure" }, estimate.low && estimate.high ? estimate.low + "–" + estimate.high : figure || "Not verified"),
+      h("h2", null, "Footprint"),
+      estimate.companyHeadline ? h("h3", null, "Company") : null,
+      estimate.companyHeadline ? h("p", { className: "hero" }, estimate.companyHeadline) : null,
+      h("h3", null, "This kind of product"),
+      h("p", null, estimate.productHeadline || label),
+      estimate.detail ? h("p", null, estimate.detail) : null,
+      estimate.source && estimate.source.url
+        ? h("a", { href: estimate.source.url, target: "_blank", rel: "noreferrer" }, estimate.source.title || "Outside source")
+        : null
     );
   }
 
@@ -264,16 +402,17 @@
     const product = [];
     const seller = [];
     const seen = new Set();
-    function add(quote, source, url) {
+    function add(quote, source, url, image) {
       const clean = String(quote || "").replace(/\s+/g, " ").trim();
-      if (clean.length < 30 || seen.has(clean)) return;
+      if (clean.length < 12 || seen.has(clean)) return;
+      if (/customer reviews help|help customers decide|was this review helpful|write a review|no customer reviews|be the first to/i.test(clean)) return;
       seen.add(clean);
-      const row = { quote: clean, source: source || "Review", url: url || "" };
+      const row = { quote: clean, source: source || "Review", url: url || "", image: /^https?:/i.test(String(image || "")) ? image : "" };
       if (/\b(seller|sold by|customer service|shipping|merchant|this store|the shop|shop owner)\b/i.test(clean)) seller.push(row);
       else product.push(row);
     }
-    (((state.dossier || {}).reviews) || []).forEach((review) => add(review.quote, review.source, review.url));
-    (((state.outside || {}).reviews) || []).forEach((review) => add(review.quote, review.source, review.url));
+    (((state.dossier || {}).reviews) || []).forEach((review) => add(review.quote, review.source, review.url, review.image));
+    (((state.outside || {}).reviews) || []).forEach((review) => add(review.quote, review.source, review.url, review.image));
     const reviewBar = ((state.summary && state.summary.bars) || []).find((bar) => bar.label === "Reviews");
     ((reviewBar && reviewBar.points) || []).forEach((quote) => add(quote, "This page", ""));
     const sellerRecord = (state.dossier || {}).seller || {};
@@ -288,28 +427,29 @@
     return h(
       "article",
       { className: "review-card" },
+      review.image ? h("img", { src: review.image, alt: "" }) : null,
       h("p", null, review.quote),
-      review.url
+      review.url && !/^this page$/i.test(String(review.source || ""))
         ? h("a", { href: review.url, target: "_blank", rel: "noopener noreferrer" }, review.source || "Source")
-        : h("em", null, review.source || "This page")
+        : null
     );
   }
 
   function ReviewPage({ state }) {
     const groups = reviewGroups(state);
+    if (!groups.product.length && !groups.seller.length) {
+      const note = ((state.outside || {}).coverage || {}).reviews || "No customer review excerpt was retrieved from other sites. Retailer help text is not treated as a review.";
+      return h("article", { className: "section-page visual" }, h("h2", null, "Reviews"), h("p", { className: "hero" }, note));
+    }
     return h(
       "article",
       { className: "section-page visual" },
       h("h2", null, "Reviews"),
-      h("h3", null, "About the product"),
-      groups.product.length
-        ? groups.product.map((review) => h(ReviewCard, { key: review.quote, review: review }))
-        : h("p", { className: "hero" }, "No review from another person was retrieved for this product."),
-      h("h3", null, "About the seller"),
+      groups.product.length ? h("h3", null, "About the product") : null,
+      groups.product.map((review) => h(ReviewCard, { key: review.quote, review: review })),
+      groups.seller.length || groups.sellerName ? h("h3", null, "About the seller") : null,
       groups.sellerName ? h("p", null, "The page names the seller as " + groups.sellerName + ".") : null,
-      groups.seller.length
-        ? groups.seller.map((review) => h(ReviewCard, { key: review.quote, review: review }))
-        : h("p", { className: "hero" }, "No review about the seller was retrieved.")
+      groups.seller.map((review) => h(ReviewCard, { key: review.quote, review: review }))
     );
   }
 
@@ -332,11 +472,10 @@
   }
 
   function Mark() {
-    return h(
-      "span",
-      { className: "mark", "aria-hidden": "true" },
-      h("span", { className: "spark" }, "✶")
-    );
+    const src = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.getURL
+      ? chrome.runtime.getURL("icons/logo.jpeg")
+      : "icons/logo.jpeg";
+    return h("img", { className: "mark", src: src, alt: "Unmasked" });
   }
 
   function Reading({ state }) {
@@ -417,11 +556,32 @@
         h(
           "article",
           { className: "card", role: "listitem", key: product.url || product.name },
-          product.imageUrl
+          /^https?:/i.test(String(product.imageUrl || ""))
             ? h("img", { src: product.imageUrl, alt: "" })
-            : h("span", { className: "photo" }, (product.store || "?").slice(0, 1)),
-          h("h3", null, product.name),
-          h("p", null, (product.store || "Review") + (product.price ? " · $" + product.price : "")),
+            : h("span", { className: "photo" }, String(product.store || product.name || "•").slice(0, 1)),
+          h(
+            "h3",
+            null,
+            product.url
+              ? h("a", { href: product.url, target: "_blank", rel: "noopener noreferrer" }, product.name)
+              : product.name
+          ),
+          product.store || product.price || product.priceNote
+            ? h(
+                "p",
+                null,
+                [product.store, product.price ? "$" + product.price : product.priceNote].filter(Boolean).join(" · ")
+              )
+            : null,
+          product.reviewScore || product.reviewNote
+            ? h("p", null, product.reviewScore ? product.reviewScore + " out of 5" : product.reviewNote)
+            : null,
+          product.footprintLow && product.footprintHigh
+            ? h("p", null, product.footprintLow + "–" + product.footprintHigh + " kg CO2e" + (product.footprintNote ? ". " + product.footprintNote : ""))
+            : product.footprintNote
+              ? h("p", null, product.footprintNote)
+              : null,
+          product.because ? h("p", { className: "why" }, product.because) : null,
           product.quotation || product.message ? h("p", { className: "why" }, product.quotation || product.message) : null,
           h("button", { type: "button", onClick: () => onAdd(product) }, "Add"),
           onWishlist ? h("button", { type: "button", onClick: () => onWishlist(product) }, "Wishlist") : null
@@ -505,13 +665,10 @@
     return h(
       "article",
       { className: "section-page visual" },
-      h("div", { className: "ring unverified", role: "img", "aria-label": "Carbon footprint not verified" }, h("strong", null, "—")),
+      h("div", { className: "ring unverified", role: "img", "aria-label": block.reason || "Footprint not estimated" }, h("strong", null, "—")),
       h("h2", null, "Carbon footprint"),
-      h("p", { className: "hero" }, "Carbon footprint not verified."),
-      h("p", null, String(block.reason || "No verified product-specific CO2e measurement was found.").replace(/^Carbon footprint not verified\.\s*/i, "")),
-      /insufficient to calculate/i.test(String(block.reason || ""))
-        ? null
-        : h("p", { className: "why-line" }, "Material information alone is insufficient to calculate a defensible footprint.")
+      h("p", { className: "hero" }, block.reason || "The page did not name a material, so the footprint is not estimated."),
+      h("p", null, "The estimate uses the material and the product type when the page names them.")
     );
   }
 
@@ -719,16 +876,26 @@
 
   const css = [
     ".host, .dock, .panel, button, input { font-family: \"Avenir Next\", \"Segoe UI\", \"Helvetica Neue\", sans-serif; }",
-    ".dock { position: fixed; right: 16px; bottom: 16px; z-index: 1; display: flex; justify-content: flex-end; pointer-events: none; }",
+    ".dock { position: fixed; right: 16px; bottom: 16px; z-index: 2147483646; display: flex; justify-content: flex-end; pointer-events: none; }",
+    ".dock.open { top: 0; right: 0; bottom: 0; }",
     ".launcher, .panel, .composer, .card button, .sheet button, .icon, .pager button { pointer-events: auto; }",
     ".launcher { display: inline-flex; align-items: center; gap: 12px; border: 0; border-radius: 999px; background: linear-gradient(135deg, #1f6b45, #16382c 55%, #2b2418); color: #fff; padding: 8px 18px 8px 8px; cursor: pointer; box-shadow: 0 12px 32px rgba(31,107,69,0.35); font: inherit; }",
     ".launcher-copy { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; text-align: left; }",
     ".launcher-copy strong { font-size: 15px; font-weight: 700; }",
     ".launcher-copy span { font-size: 12px; opacity: 0.72; }",
     ".panel { width: min(400px, calc(100vw - 24px)); height: min(860px, 88vh); max-height: min(860px, 88vh); display: flex; flex-direction: column; color: #f7f4ee; background: linear-gradient(180deg, #1c3d32 0%, #243028 38%, #2a2420 100%); border-radius: 28px; box-shadow: 0 18px 50px rgba(0,0,0,0.35); overflow: hidden; }",
-    ".panel.expanded { width: min(460px, calc(100vw - 16px)); height: 94vh; max-height: 94vh; }",
+    ".dock.open .panel { width: min(440px, 100vw); height: 100vh; max-height: 100vh; border-radius: 0; border-left: 1px solid rgba(244,210,122,0.35); }",
+    ".panel.expanded { width: min(520px, 100vw); }",
+    ".views { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 14px 8px; }",
+    ".views button { border: 0; border-radius: 999px; min-height: 36px; background: rgba(247,244,238,0.08); color: inherit; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }",
+    ".views button[aria-pressed='true'] { background: #f4d27a; color: #1c3d32; }",
+    ".login { display: flex; flex-direction: column; gap: 10px; padding: 8px 4px 24px; }",
+    ".login input { min-height: 44px; border: 0; border-radius: 12px; padding: 0 12px; font: inherit; }",
+    ".login button { min-height: 42px; border: 0; border-radius: 999px; font: inherit; font-weight: 700; cursor: pointer; }",
+    ".login button[type='submit'] { background: #f4d27a; color: #1c3d32; }",
+    ".login button[type='button'] { background: transparent; color: inherit; }",
     ".bar { display: flex; align-items: center; gap: 8px; padding: 14px 14px 8px; }",
-    ".mark { width: 36px; height: 36px; border-radius: 50%; background: #f4d27a; color: #1c3d32; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; box-shadow: 0 0 0 4px rgba(244,210,122,0.25); }",
+    ".mark { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; box-shadow: 0 0 0 4px rgba(244,210,122,0.25); }",
     ".panel.reading .mark { animation: pulse 1.2s ease-in-out infinite; }",
     ".spark { font-size: 16px; line-height: 1; }",
     ".titles { flex: 1; min-width: 0; }",
@@ -777,6 +944,7 @@
     ".pager p { margin: 0; text-align: center; font-weight: 700; color: #f4d27a; }",
     ".pager span { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: rgba(247,244,238,0.72); }",
     ".concern, .review-card { margin: 0 0 10px; padding: 12px 14px; border-radius: 16px; background: rgba(247,244,238,0.08); }",
+    ".review-card img { width: 100%; height: 160px; object-fit: cover; border-radius: 12px; margin-bottom: 10px; background: #111; }",
     ".concern { border: 1px solid rgba(255,138,91,0.7); }",
     ".concern span, .review-card em { display: block; margin-top: 6px; font-style: normal; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: #ff8a5b; }",
     ".review-card em { color: rgba(247,244,238,0.72); letter-spacing: 0; text-transform: none; }",

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
 from backend.app.integrations.tavily_client import TavilyClient
+from backend.app.services.catalog.identity import known_kind
 
 _ASK = re.compile(
     r"\b(?:find|show|get|search(?: for)?|look for)\s+(?:me\s+)?(?:an?\s+|some\s+)?([a-z][a-z0-9\- ]{1,40})",
@@ -40,6 +41,52 @@ _PAIRS = (
     (re.compile(r"\bsofa\b|\bcouch\b", re.IGNORECASE), "throw pillow"),
     (re.compile(r"\bdesk\b", re.IGNORECASE), "desk chair"),
 )
+
+
+_ECO = re.compile(r"\b(?:environment\w*|eco(?:-|\s)?friendly|greener|sustainab\w*)\b", re.IGNORECASE)
+_WITH = re.compile(r"\b(?:go(?:es)? with|pair(?:s)? with|to go with|that go with|with this product)\b", re.IGNORECASE)
+_ECO_WORDS = re.compile(
+    r"\b(?:environmentally friendly|eco-friendly|eco friendly|greener|sustainable|green)\b",
+    re.IGNORECASE,
+)
+_SHELTER = re.compile(r"\b(?:canop(?:y|ies)|gazebos?|tents?)\b", re.IGNORECASE)
+
+
+def paired_item(question: str, title: str = "") -> tuple[str, str] | None:
+    """The product to look up, plus an eco-friendly search prefix when the shopper asked for one."""
+    question = question or ""
+    item = _clean_item(requested_item(question, title) or "")
+    if item in _GENERIC:
+        item = ""
+    eco = bool(_ECO.search(question))
+    together = bool(_WITH.search(question) or _BARE.search(question))
+    if not item and not together:
+        return None
+    if not item:
+        item = _companion(title)
+    if not item:
+        return None
+    kind = known_kind(item) or item
+    if together or eco:
+        kind = _companion_item(title, kind)
+    return kind, ("eco friendly" if eco else "")
+
+
+def _clean_item(item: str) -> str:
+    return " ".join(_ECO_WORDS.sub(" ", item).split())
+
+
+def _companion(title: str) -> str:
+    if _SHELTER.search(title or ""):
+        return "folding chair"
+    return _inferred(title) or ""
+
+
+def _companion_item(title: str, item: str) -> str:
+    kind = known_kind(item) or item
+    if _SHELTER.search(title or "") and kind in {"chair", "chairs"}:
+        return "folding chair"
+    return kind
 
 
 def requested_item(question: str, title: str = "") -> str | None:
@@ -85,6 +132,9 @@ _BLOCKED_HOSTS = {
 _STORE_QUERIES = (
     ("walmart.com", "site:walmart.com/ip"),
     ("amazon.com", "site:amazon.com/dp"),
+    ("target.com", "site:target.com/p"),
+    ("bestbuy.com", "site:bestbuy.com"),
+    ("ebay.com", "site:ebay.com/itm"),
     ("etsy.com", "site:etsy.com/listing"),
     ("homedepot.com", "site:homedepot.com/p/"),
 )
@@ -92,6 +142,7 @@ _STORE_NAMES = {
     "walmart.com": "Walmart",
     "amazon.com": "Amazon",
     "target.com": "Target",
+    "bestbuy.com": "Best Buy",
     "wayfair.com": "Wayfair",
     "ebay.com": "eBay",
     "homedepot.com": "Home Depot",
@@ -115,6 +166,7 @@ def find_products(
     size = _size(title, page_text)
     current_host = _host(current_url)
     queries = [f"{query_prefix} {size} {item} {hint}".strip() for _host, hint in _STORE_QUERIES]
+    queries.append(f"{query_prefix} {size} {item} for sale".strip())
     hits = []
     with ThreadPoolExecutor(max_workers=len(queries)) as pool:
         for batch in pool.map(lambda query: _safe_search(search, query), queries):
@@ -124,11 +176,32 @@ def find_products(
     seen = set()
     for hit in hits:
         card = _card(item, hit, current_host)
-        if card is None or not card.get("imageUrl") or card["store"] in seen:
+        if card is None or card["store"] in seen:
             continue
         seen.add(card["store"])
         cards.append(card)
-        if len(cards) == 6:
+        if len(cards) == 8:
+            break
+    return cards
+
+
+def loose_products(item: str, current_url: str = "", search=None) -> list[dict]:
+    """Other-store listings for this kind of product when the store-by-store search came back short."""
+    search = search or _search
+    current_host = _host(current_url)
+    hits = []
+    for query in (f"{item} for sale", f"best {item} to buy"):
+        hits.extend(_safe_search(search, query))
+    cards = []
+    seen = set()
+    for hit in hits:
+        card = _card(item, hit, current_host)
+        if card is None or card["store"] in seen or card["url"] in seen:
+            continue
+        seen.add(card["store"])
+        seen.add(card["url"])
+        cards.append(card)
+        if len(cards) == 8:
             break
     return cards
 
@@ -142,7 +215,7 @@ def _safe_search(search, query: str) -> list[dict]:
 
 
 def _search(query: str) -> list[dict]:
-    return TavilyClient().search(query, max_results=4, search_depth="basic", include_images=True)
+    return TavilyClient().search(query, max_results=6, search_depth="basic", include_images=True)
 
 
 def _extract(urls: list[str]) -> list[dict]:
@@ -193,9 +266,7 @@ def _card(item: str, hit: dict, current_host: str) -> dict | None:
     weak = [word for word in ("cover", "plate", "switch", "sticker", "wallpaper") if word not in item.lower()]
     if any(word in name.lower() for word in weak):
         return None
-    price = _price(hit)
-    if price is None:
-        return None
+    price = _price(hit) or ""
     return {
         "name": name,
         "store": _STORE_NAMES.get(host, host.split(".")[0].title()),
@@ -214,17 +285,29 @@ _WORD_ALIASES = {
 }
 
 
+_RIVALS = {
+    "monitor": ("blood pressure", "baby monitor", "heart rate", "glucose"),
+    "computer monitor": ("blood pressure", "baby monitor", "heart rate", "glucose"),
+}
+
+
 def _same_kind(item: str, name: str) -> bool:
     """The listing title has to be this product, not a page that merely mentions it."""
-    if not _matches(item, name.lower()):
-        return False
-    from backend.app.services.catalog.identity import known_kind
+    blob = name.lower()
+    from backend.app.services.catalog.identity import known_kind, same_product
 
-    listed = known_kind(name)
     wanted = known_kind(item) or item.lower()
+    if any(phrase in blob for phrase in _RIVALS.get(wanted, ())):
+        return False
+    if wanted in {"monitor", "computer monitor"} and re.search(r"\b(?:monitors?|displays?)\b", blob):
+        listed = known_kind(name)
+        return not listed or same_product(wanted, listed)
+    if not _matches(item, blob):
+        return False
+    listed = known_kind(name)
     if not listed:
         return True
-    return listed == wanted or listed in wanted or wanted in listed
+    return same_product(wanted, listed)
 
 
 def _matches(item: str, blob: str) -> bool:
@@ -268,7 +351,26 @@ def _product_page(url: str) -> bool:
         )
     ):
         return False
-    return any(piece in lowered for piece in ("/products/", "/product/", "/ip/", "/dp/", "/p/", "/listing/", "/itm/"))
+    if any(
+        piece in lowered
+        for piece in ("/products/", "/product/", "/ip/", "/dp/", "/gp/product/", "/gp/aw/d/", "/pd/", "/p/", "/listing/", "/itm/")
+    ):
+        return True
+    host = urlparse(url).netloc.lower()
+    retail = (
+        "bestbuy.com",
+        "target.com",
+        "walmart.com",
+        "amazon.com",
+        "ebay.com",
+        "homedepot.com",
+        "lowes.com",
+        "newegg.com",
+        "costco.com",
+        "wayfair.com",
+        "rei.com",
+    )
+    return any(store in host for store in retail) and (lowered.endswith(".p") or bool(re.search(r"/\d{5,}", lowered)))
 
 
 _NOT_SELLABLE = re.compile(

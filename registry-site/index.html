@@ -204,6 +204,47 @@
     .signin label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
     .signin input { min-width: 220px; min-height: 44px; border: 2px solid var(--green); border-radius: 8px; padding: 8px 12px; font: inherit; background: var(--white); }
     .purchase-list { display: grid; gap: 12px; margin-top: 16px; }
+    .bill {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 18px;
+      padding: 18px;
+      background: var(--white);
+      border-top: 3px solid var(--gold);
+    }
+    .bill h3 { margin: 0 0 8px; font-size: 26px; }
+    .drop {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 140px;
+      margin-top: 10px;
+      padding: 16px;
+      border: 2px dashed var(--leaf);
+      border-radius: 12px;
+      background: var(--paper);
+      text-align: center;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .drop input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .bill textarea, .bill input[type="text"] {
+      width: 100%;
+      min-height: 140px;
+      border: 2px solid var(--green);
+      border-radius: 12px;
+      padding: 12px;
+      font: inherit;
+      background: var(--white);
+    }
+    .bill-items { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .bill-items span {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--paper);
+      font-size: 15px;
+    }
     .purchase { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
     .purchase h3 { margin: 0 0 6px; font-family: Merriweather, Georgia, serif; font-size: 22px; }
     .purchase p { margin: 0 0 4px; }
@@ -276,7 +317,7 @@
     </div>
     <div class="ledger" id="preview" aria-live="polite"></div>
   </section>
-  <section class="wrap" id="agent">
+  <section class="wrap" id="agent" hidden>
     <p class="kicker">On the product page</p>
     <div class="split">
       <h2>The same assistant, in the page chat</h2>
@@ -305,21 +346,48 @@
   <section class="wrap" id="purchases">
     <p class="kicker">After you buy</p>
     <h2>Your products, scores, and delivery</h2>
-    <p class="quiet">Sign in to see purchases saved in Supabase. The environment footprint is the average score of those products. Delivery status is the assistant's record, and a Photon text goes out when it changes.</p>
+    <p class="quiet">Sign in to see purchases the extension saved at checkout, plus bills you upload. Brands and colors you kept are used when similar products are suggested. Mark a return when you sent something back.</p>
     <form class="signin" id="signin">
-      <label>Your name
-        <input id="shopper-name" name="name" type="text" autocomplete="name" required>
+      <label>Email
+        <input id="shopper-email" name="email" type="email" autocomplete="email" required>
       </label>
-      <button class="btn fill" type="submit">Sign in</button>
+      <label>Password
+        <input id="shopper-password" name="password" type="password" autocomplete="current-password" minlength="8" required>
+      </label>
+      <label id="name-label" hidden>Name
+        <input id="shopper-name" name="name" type="text" autocomplete="name">
+      </label>
+      <button class="btn fill" type="submit">Log in</button>
+      <button class="btn" type="button" id="create-account">Create an account</button>
+      <p id="auth-error"></p>
     </form>
     <div id="account" hidden>
       <p id="hello"></p>
-      <p id="footprint"></p>
+      <p id="signin-update"></p>
+      <p id="taste"></p>
       <div class="purchase-list" id="purchase-cards"></div>
+      <form id="receipt-form" class="bill">
+        <div>
+          <h3>Add a past bill</h3>
+          <p class="quiet">A photo, PDF, or text file. The products, brands, and colors are read from it and used when similar products are suggested.</p>
+          <label class="drop" id="bill-drop">
+            <input id="receipt-file" name="file" type="file" accept=".txt,.pdf,.png,.jpg,.jpeg,.webp,text/plain,application/pdf,image/*">
+            <span id="bill-file-name">Drop a bill here, or choose a file</span>
+          </label>
+        </div>
+        <div>
+          <label>Or paste the receipt
+            <textarea id="receipt-text" name="text" placeholder="Patagonia Men's Navy Jacket $199.00"></textarea>
+          </label>
+          <button class="btn fill" type="submit">Read this bill</button>
+        </div>
+      </form>
+      <p id="receipt-status"></p>
+      <div class="purchase-list" id="receipt-cards"></div>
       <button class="btn" type="button" id="signout">Sign out</button>
     </div>
   </section>
-  <section class="wrap" id="wishlist">
+  <section class="wrap" id="wishlist" hidden>
     <p class="kicker">Saved from the agent</p>
     <h2>Wishlist</h2>
     <p class="quiet">Products you save from the chat are listed here. Saving one sends a Photon 2.0 text when the agent user and space are set.</p>
@@ -345,7 +413,7 @@
       <tbody id="rows"></tbody>
     </table>
   </section>
-  <section class="wrap" id="install">
+  <section class="wrap" id="install" hidden>
     <p class="kicker">Get the extension</p>
     <div class="split">
       <div>
@@ -356,7 +424,7 @@
         <li class="step"><span class="num">1</span><p><a href="/extension.zip">Download the extension</a> and unzip it.</p></li>
         <li class="step"><span class="num">2</span><p>Open <code>chrome://extensions</code> and turn on Developer mode.</p></li>
         <li class="step"><span class="num">3</span><p>Choose Load unpacked and select the <code>unmasked</code> folder.</p></li>
-        <li class="step"><span class="num">4</span><p>Open a product page. The chat on the page is the agent. This site has no toolbar popup.</p></li>
+        <li class="step"><span class="num">4</span><p>Open a product page and sign in with the same email and password as this site. Orders, the wishlist, and recommendations stay on that account.</p></li>
       </ol>
     </div>
   </section>
@@ -390,7 +458,7 @@
         </ul>
       </div>
     </div>
-    <p class="legal">© 2026 Unmasked. The registry shows activity from the assistant running on this computer.</p>
+    <p class="legal">© 2026 Unmasked. The public registry lists product findings. Orders, messages, and the wishlist stay on the signed-in account.</p>
   </footer>
   <script>
     const labels = { page: "Page", ask: "Question", message: "Message", call: "Call", order: "Order", intro: "Text" };
@@ -568,32 +636,88 @@
         document.getElementById("updated").textContent = "The registry is not reachable right now.";
       }
     }
-    const NAME_KEY = "unmaskedShopper";
+    const TOKEN_KEY = "unmaskedToken";
+    const ACCOUNT_KEY = "unmaskedAccount";
     const signin = document.getElementById("signin");
     const account = document.getElementById("account");
     const shopperName = document.getElementById("shopper-name");
+    const shopperEmail = document.getElementById("shopper-email");
+    const shopperPassword = document.getElementById("shopper-password");
+    let authMode = "login";
+
+    function authHeaders() {
+      const headers = { "Content-Type": "application/json" };
+      const token = localStorage.getItem(TOKEN_KEY) || "";
+      if (token) headers.Authorization = "Bearer " + token;
+      return headers;
+    }
 
     function signedIn() {
-      return localStorage.getItem(NAME_KEY) || "";
+      return localStorage.getItem(TOKEN_KEY) || "";
+    }
+
+    function accountName() {
+      try {
+        return (JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "{}").name) || "";
+      } catch (error) {
+        return "";
+      }
     }
 
     function showAccount() {
-      const name = signedIn();
-      signin.hidden = Boolean(name);
-      account.hidden = !name;
-      if (name) document.getElementById("hello").textContent = "Signed in as " + name + ".";
+      const token = signedIn();
+      signin.hidden = Boolean(token);
+      account.hidden = !token;
+      ["agent", "wishlist", "install"].forEach((id) => {
+        const section = document.getElementById(id);
+        if (section) section.hidden = !token;
+      });
+      if (token) document.getElementById("hello").textContent = "Signed in as " + (accountName() || "your account") + ".";
+    }
+
+    function tasteLine(taste) {
+      const brands = taste && Array.isArray(taste.brands) ? taste.brands : [];
+      const colors = taste && Array.isArray(taste.colors) ? taste.colors : [];
+      const avoid = taste && Array.isArray(taste.avoid) ? taste.avoid : [];
+      if (!brands.length && !colors.length && !avoid.length) return "No kept brands or colors yet. A checkout or a past bill will add them.";
+      const parts = [];
+      const kept = brands.concat(colors);
+      parts.push(kept.length ? "Similar products use what you kept: " + kept.join(", ") + "." : "No kept brands or colors yet.");
+      if (avoid.length) parts.push("Returned brands are left out: " + avoid.join(", ") + ".");
+      return parts.join(" ");
     }
 
     function paintPurchases(payload) {
       const cards = document.getElementById("purchase-cards");
       const orders = payload && Array.isArray(payload.orders) ? payload.orders : [];
-      const footprint = payload && payload.footprint;
-      document.getElementById("footprint").textContent = footprint == null
-        ? "No purchases yet, so there is no environment footprint."
-        : "Your environment footprint is " + footprint + " out of 100, the average score of the products you bought.";
+      const update = payload && payload.update;
+      const updateLine = document.getElementById("signin-update");
+      if (updateLine) {
+        updateLine.textContent = update && update.text
+          ? update.text + (update.reason ? " " + update.reason : "")
+          : "";
+      }
+      document.getElementById("taste").textContent = tasteLine(payload && payload.taste);
       cards.innerHTML = orders.length
-        ? orders.map((order) => `<article class="purchase"><h3>${escape(order.name)}</h3><p>${escape(order.store || "Store")} · $${escape(order.price || "")}</p><p>Environment score ${order.environmentScore == null ? "not scored" : escape(order.environmentScore) + " out of 100"}</p><p>${escape(order.materials || "")}</p><p><strong>${escape(order.status || "Placed")}</strong> — ${escape(order.statusNote || "")}</p></article>`).join("")
-        : "<p>No purchases yet. Add a product in the page chat and choose Purchase all.</p>";
+        ? orders.map((order) => {
+            const returned = String(order.status || "") === "Returned" || /returned:yes/.test(String(order.materials || ""));
+            const detail = String(order.materials || "").replace(/\b(?:brand|color):/g, "").replace(/\breturned:yes\b/g, "").replace(/\s+/g, " ").trim();
+            return `<article class="purchase"><h3>${escape(order.name)}</h3><p>${escape(order.store || "Store")} · $${escape(order.price || "")}</p><p>${escape(detail)}</p><p><strong>${escape(order.status || "Placed")}</strong> — ${escape(order.statusNote || "")}</p>${returned ? "" : `<button class="btn" type="button" data-return="${escape(order.orderId || "")}">Mark returned</button>`}</article>`;
+          }).join("")
+        : "<p>No purchases yet. Finish a store checkout with the extension, or choose Purchase all in the page chat.</p>";
+      paintReceipts(payload && payload.receipts);
+    }
+
+    function paintReceipts(receipts) {
+      const cards = document.getElementById("receipt-cards");
+      const rows = Array.isArray(receipts) ? receipts : [];
+      cards.innerHTML = rows.length
+        ? rows.map((receipt) => {
+            const items = Array.isArray(receipt.items) ? receipt.items : [];
+            const chips = items.map((item) => `<span>${escape(item.name)}${item.brand ? " · " + escape(item.brand) : ""}${item.color ? " · " + escape(item.color) : ""}${item.returned ? " · returned" : ""}</span>`).join("");
+            return `<article class="purchase"><h3>${escape(receipt.filename || "Receipt")}</h3><div class="bill-items">${chips || "<span>No product line was read.</span>"}</div></article>`;
+          }).join("")
+        : "<p>No bills yet.</p>";
     }
 
     function paintWishlist(payload) {
@@ -605,8 +729,12 @@
     }
 
     async function loadWishlist() {
+      if (!signedIn()) {
+        document.getElementById("wishlist-cards").innerHTML = "<p>Sign in to see products you saved.</p>";
+        return;
+      }
       try {
-        const response = await fetch("/wishlist");
+        const response = await fetch("/wishlist", { headers: authHeaders() });
         paintWishlist(await response.json());
       } catch (error) {
         document.getElementById("wishlist-cards").innerHTML = "<p>The wishlist is not reachable right now.</p>";
@@ -616,23 +744,102 @@
     async function loadPurchases() {
       if (!signedIn()) return;
       try {
-        const response = await fetch("/purchases");
+        const response = await fetch("/purchases", { headers: authHeaders() });
         paintPurchases(await response.json());
       } catch (error) {
-        document.getElementById("footprint").textContent = "Purchases are not reachable right now.";
+        document.getElementById("taste").textContent = "Purchases are not reachable right now.";
       }
     }
 
-    signin.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const name = shopperName.value.trim();
-      if (!name) return;
-      localStorage.setItem(NAME_KEY, name);
-      showAccount();
+    document.getElementById("purchase-cards").addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-return]");
+      if (!button || !button.getAttribute("data-return")) return;
+      button.disabled = true;
+      await fetch("/purchases/return", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ order_id: button.getAttribute("data-return") }),
+      });
       loadPurchases();
     });
-    document.getElementById("signout").addEventListener("click", () => {
-      localStorage.removeItem(NAME_KEY);
+
+    const billFile = document.getElementById("receipt-file");
+    const billName = document.getElementById("bill-file-name");
+    billFile.addEventListener("change", () => {
+      const file = billFile.files[0];
+      billName.textContent = file ? file.name : "Drop a bill here, or choose a file";
+    });
+    document.getElementById("receipt-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const status = document.getElementById("receipt-status");
+      const file = document.getElementById("receipt-file").files[0];
+      const body = { text: document.getElementById("receipt-text").value || "", filename: file ? file.name : "", data_base64: "" };
+      if (file) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        bytes.forEach((value) => {
+          binary += String.fromCharCode(value);
+        });
+        body.data_base64 = btoa(binary);
+      }
+      status.textContent = "Reading the bill…";
+      try {
+        const response = await fetch("/receipts", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        const count = payload && Array.isArray(payload.items) ? payload.items.length : 0;
+        status.textContent = payload.reason || (count ? "Read " + count + " product" + (count === 1 ? "" : "s") + " from this bill." : "No product line was read.");
+        document.getElementById("receipt-text").value = "";
+        document.getElementById("receipt-file").value = "";
+        loadPurchases();
+      } catch (error) {
+        status.textContent = "The bill could not be read just now.";
+      }
+    });
+
+    document.getElementById("create-account").addEventListener("click", () => {
+      authMode = authMode === "register" ? "login" : "register";
+      document.getElementById("name-label").hidden = authMode !== "register";
+      shopperName.required = authMode === "register";
+      signin.querySelector("button[type='submit']").textContent = authMode === "register" ? "Create account" : "Log in";
+      document.getElementById("create-account").textContent = authMode === "register" ? "I already have an account" : "Create an account";
+    });
+    signin.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.getElementById("auth-error");
+      error.textContent = "";
+      const response = await fetch(authMode === "register" ? "/auth/register" : "/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: shopperEmail.value.trim(),
+          password: shopperPassword.value,
+          name: shopperName.value.trim(),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.token) {
+        error.textContent = payload.detail || "That email or password is not right.";
+        return;
+      }
+      localStorage.setItem(TOKEN_KEY, payload.token);
+      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(payload.account || {}));
+      const signedUpdate = document.getElementById("signin-update");
+      if (signedUpdate && payload.update && payload.update.text) {
+        signedUpdate.textContent = payload.update.text + (payload.update.reason ? " " + payload.update.reason : "");
+      }
+      shopperPassword.value = "";
+      showAccount();
+      loadPurchases();
+      loadWishlist();
+    });
+    document.getElementById("signout").addEventListener("click", async () => {
+      await fetch("/auth/logout", { method: "POST", headers: authHeaders() });
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(ACCOUNT_KEY);
       showAccount();
     });
     showAccount();

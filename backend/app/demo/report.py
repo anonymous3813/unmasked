@@ -117,6 +117,15 @@ def demo_report() -> dict:
 
 def demo_answer(question: str) -> str:
     """Answer a demo question from the fixture only."""
+    from backend.app.services.shop.guard import UNSOURCED, gate, sanitize
+
+    blocked = gate(question)
+    if blocked is not None:
+        return blocked
+    return sanitize(_fixture_answer(question, UNSOURCED))
+
+
+def _fixture_answer(question: str, unsourced: str) -> str:
     report = demo_report()
     text = (question or "").lower()
     memory = report["memory"]
@@ -139,6 +148,28 @@ def demo_answer(question: str) -> str:
     if "claim" in text or "battery" in text:
         claim = report["claim"]
         return f"The claim \"{claim['text']}\" is {claim['verdict']}. {claim['explanation']}"
+    shopping = (
+        "return",
+        "recommend",
+        "environment",
+        "green",
+        "sustain",
+        "wrong",
+        "concern",
+        "risk",
+        "complain",
+        "review",
+        "claim",
+        "battery",
+        "headphone",
+        "harbor",
+        "price",
+        "warrant",
+        "cushion",
+        "policy",
+    )
+    if not any(word in text for word in shopping):
+        return unsourced
     return (
         f"{report['assessment']} Ask about the return, the battery claim, the reviews, "
         "or which model fits what you returned before. This is demo data."

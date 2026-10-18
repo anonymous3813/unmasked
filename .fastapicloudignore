@@ -1,0 +1,8 @@
+.git
+.venv
+backend/.venv
+**/.env
+**/__pycache__
+.pytest_cache
+.fastapicloud
+web/node_modules

@@ -2,15 +2,13 @@
 
 from datetime import datetime, timezone
 
-_items: list[dict] = []
+_items: dict[str, list[dict]] = {}
 
 
-def add_wishlist(item: dict) -> dict:
+def add_wishlist(item: dict, user_id: str = "shopper") -> dict:
     """Save one recommended product and text the shopper on Photon 2.0."""
     from backend.app.integrations.photon_line import send_intro
     from backend.app.integrations.supabase_store import save_wishlist
-    from backend.app.services.registry.log import record
-
     url = str(item.get("url") or "").strip()
     name = " ".join(str(item.get("name") or "").split())
     if not url or not name:
@@ -24,9 +22,10 @@ def add_wishlist(item: dict) -> dict:
         "environmentScore": item.get("environmentScore"),
         "savedAt": datetime.now(timezone.utc).isoformat(),
     }
-    _items[:] = [row for row in _items if row["url"] != url]
-    _items.insert(0, saved)
-    save_wishlist(saved)
+    rows = _items.setdefault(user_id, [])
+    rows[:] = [row for row in rows if row["url"] != url]
+    rows.insert(0, saved)
+    save_wishlist(saved, user_id)
     price = f" for ${saved['price']}" if saved["price"] else ""
     text = f"Saved {saved['name']} from {saved['store'] or 'a store'}{price} to your wishlist. {url}"
     result = send_intro(text) or {}
@@ -35,16 +34,15 @@ def add_wishlist(item: dict) -> dict:
     else:
         reason = str(result.get("reason") or "The Photon text was not delivered.")
         answer = f"{saved['name']} is on your wishlist. {reason}"
-    record("page", f"Wishlist · {saved['name']}", answer, url)
     return {"saved": True, "answer": answer, "item": _public(saved), "text": result}
 
 
-def wishlist() -> dict:
-    """Return the saved products, including ones stored in Supabase."""
+def wishlist(user_id: str = "shopper") -> dict:
+    """Return the products this shopper saved, including ones stored in Supabase."""
     from backend.app.integrations.supabase_store import load_wishlist
 
-    stored = load_wishlist()
-    by_url = {row["url"]: row for row in _items}
+    stored = load_wishlist(user_id)
+    by_url = {row["url"]: row for row in _items.get(user_id, [])}
     for row in stored or []:
         by_url[row["url"]] = row
     rows = sorted(by_url.values(), key=lambda row: row.get("savedAt") or "", reverse=True)

@@ -27,7 +27,7 @@ class ClaimExtractor:
         self._fetch = fetch or fetch_url
         self._extract_html = extract_html or _extract_with_trafilatura
         if keywords_path is None:
-            keywords_path = Path(__file__).resolve().parents[3] / "claim_words.txt"
+            keywords_path = Path(__file__).resolve().parents[2] / "claim_words.md"
         self._keywords = _load_keywords(keywords_path)
 
     def extract(self, url: str) -> list[ProductClaim]:
@@ -69,18 +69,36 @@ def _extract_with_trafilatura(html: str) -> str:
 
 
 def _load_keywords(path: Path) -> dict[str, list[str]]:
-    keywords: dict[str, list[str]] = {}
-    category = None
+    keywords: dict[str, list[str]] = {name: [] for name in _CATEGORY_PRIORITY}
+    if not path.is_file():
+        return keywords
+    category = "absolute"
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        if not stripped:
             continue
         if stripped.startswith("[") and stripped.endswith("]"):
-            category = stripped[1:-1].lower()
-            keywords[category] = []
-        elif category is not None:
-            keywords[category].append(stripped)
+            category = _map_category(stripped[1:-1])
+            continue
+        heading = re.match(r"^#+\s+(.+)$", stripped)
+        if heading:
+            category = _map_category(heading.group(1))
+            continue
+        if stripped.startswith("#") and not re.match(r"^#\d", stripped):
+            continue
+        keywords.setdefault(category, []).append(stripped.lstrip("#").strip() or stripped)
     return keywords
+
+
+def _map_category(label: str) -> str:
+    text = " ".join(str(label or "").lower().split())
+    if "certif" in text:
+        return "certification"
+    if "compar" in text or "superlative" in text:
+        return "comparative"
+    if "performance" in text or "effectiveness" in text or "quantitative" in text or "measured" in text:
+        return "quantitative"
+    return "absolute"
 
 
 def _read_page(text: str) -> tuple[str, list[str]]:
