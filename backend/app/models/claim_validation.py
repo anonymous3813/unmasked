@@ -60,7 +60,7 @@ class ProductRecommendation(BaseModel):
     source_url: HttpUrl
     evidence_quotation: str = Field(min_length=1)
     product_url: HttpUrl
-    image_url: HttpUrl
+    image_url: HttpUrl | None = None
     price: str = Field(min_length=1)
 
 

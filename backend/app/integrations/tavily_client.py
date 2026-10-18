@@ -17,25 +17,64 @@ class TavilyClient:
     api_key_env = "TAVILY_API_KEY"
     endpoint = "https://api.tavily.com/search"
 
-    def search(self, query: str) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        *,
+        include_raw_content: bool = False,
+        include_images: bool = False,
+        max_results: int = 5,
+        search_depth: str = "basic",
+    ) -> list[dict]:
         """Return Tavily result objects for one search query."""
         _load_local_env()
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError("TAVILY_API_KEY is not set")
 
-        body = json.dumps(
-            {
-                "api_key": api_key,
-                "query": query,
-                "search_depth": "basic",
-                "topic": "general",
-                "max_results": 5,
-                "include_answer": False,
-            }
-        ).encode()
+        payload = {
+            "api_key": api_key,
+            "query": query,
+            "search_depth": search_depth,
+            "topic": "general",
+            "max_results": max_results,
+            "include_answer": False,
+        }
+        if include_raw_content:
+            payload["include_raw_content"] = True
+        if include_images:
+            payload["include_images"] = True
+        wants_images = include_images
+        body = json.dumps(payload).encode()
         request = urllib.request.Request(
             self.endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                payload = json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Tavily request failed with status {exc.code}") from exc
+        results = [result for result in (payload.get("results") or []) if isinstance(result, dict)]
+        images = payload.get("images") or []
+        if wants_images and len(images) == len(results):
+            for result, image in zip(results, images):
+                url = image if isinstance(image, str) else (image or {}).get("url")
+                if url and not result.get("image"):
+                    result["image"] = url
+        return results
+
+    def extract(self, urls: list[str]) -> list[dict]:
+        """Return page text for product URLs that the search snippet did not price."""
+        _load_local_env()
+        api_key = os.environ.get(self.api_key_env)
+        if not api_key:
+            raise RuntimeError("TAVILY_API_KEY is not set")
+        body = json.dumps({"api_key": api_key, "urls": urls[:5]}).encode()
+        request = urllib.request.Request(
+            "https://api.tavily.com/extract",
             data=body,
             headers={"Content-Type": "application/json"},
             method="POST",

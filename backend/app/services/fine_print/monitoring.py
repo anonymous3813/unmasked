@@ -11,7 +11,7 @@ from backend.app.models.agent import (
     PastOrder,
 )
 from backend.app.models.fine_print import NotificationKind, ProductNotification, Severity
-from backend.app.services.agent_contact import AgentContact
+from backend.app.services.registry.contact import AgentContact
 
 _MAX_POLICIES = 12
 _PRICE = re.compile(r"\$\s*(\d+(?:,\d{3})*(?:\.\d{2})?)")
@@ -77,7 +77,11 @@ class OrderMonitor:
             return "There are no past orders on this profile."
         text = question.lower()
         if "past order" in text or "my orders" in text:
-            listed = ", ".join(f"{order.order_id} {order.product_name}" for order in profile.orders)
+            listed = ", ".join(
+                f"{order.order_id} {order.product_name}"
+                + (f" from {order.store}" if order.store else "")
+                for order in profile.orders
+            )
             return f"Past orders: {listed}."
         order = profile.orders[-1]
         context = order.fine_print

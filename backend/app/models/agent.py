@@ -41,6 +41,12 @@ class PastOrder(BaseModel):
     product_name: str = Field(min_length=1)
     product_url: HttpUrl
     ordered_at: datetime
+    store: str = ""
+    price: str = ""
+    environment_score: int | None = None
+    materials: str = ""
+    delivery_status: str = "Placed"
+    notified_status: str = ""
     fine_print: FinePrintOrderContext | None = None
 
 

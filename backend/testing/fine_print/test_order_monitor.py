@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from backend.app.models.agent import ContactPurpose
 from backend.app.models.fine_print import FinePrintExtraction, PolicyDocument
-from backend.app.services.agent_contact import AgentContact
+from backend.app.services.registry.contact import AgentContact
 from backend.app.services.fine_print.monitoring import OrderMonitor
 
 NOW = datetime(2026, 10, 17, 16, 30, tzinfo=timezone.utc)

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Unmasked demo</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.45 "Avenir Next", "Segoe UI", sans-serif; color: #1c1917; background: #f4f1ea; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 20px 28px; background: #fffaf3; border-bottom: 1px solid rgba(28, 25, 23, 0.12); }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 22px; font-weight: 600; }
+    .badge { font-size: 12px; border: 1px solid #9f2d20; color: #9f2d20; border-radius: 999px; padding: 4px 10px; }
+    main { display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 20px; max-width: 1100px; margin: 0 auto; padding: 24px; }
+    section, aside { background: #fffaf3; border: 1px solid rgba(28, 25, 23, 0.12); border-radius: 18px; padding: 18px; }
+    .product { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+    .price { font-size: 28px; }
+    .muted { color: #57534e; font-size: 14px; margin-top: 4px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+    .tabs button, .ask button, .choice, #monitor { font: inherit; cursor: pointer; border-radius: 999px; }
+    .tabs button { background: transparent; border: 1px solid rgba(28, 25, 23, 0.28); padding: 6px 12px; }
+    .tabs button[aria-pressed="true"], .ask button, #monitor { background: #1c1917; color: #fffaf3; border: 0; padding: 8px 14px; }
+    .card { border-top: 1px solid rgba(28, 25, 23, 0.12); padding: 12px 0; }
+    .card h2 { font-size: 16px; }
+    .level { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .high { color: #9f2d20; }
+    blockquote { margin: 8px 0; padding-left: 10px; border-left: 3px solid #1c1917; }
+    .alt { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid rgba(28, 25, 23, 0.12); }
+    .alt.recommended { background: #eef6f1; margin: 0 -18px; padding: 12px 18px; }
+    .thread { display: flex; flex-direction: column; gap: 8px; min-height: 180px; max-height: 320px; overflow-y: auto; }
+    .you, .agent { margin: 0; max-width: 92%; padding: 8px 10px; border-radius: 14px; }
+    .you { align-self: flex-end; background: #1c1917; color: #fffaf3; }
+    .agent { align-self: flex-start; background: #efeae2; }
+    .ask { display: flex; gap: 8px; margin-top: 12px; }
+    .ask input { flex: 1; font: inherit; border: 1px solid rgba(28, 25, 23, 0.28); border-radius: 999px; padding: 10px 14px; }
+    .choices { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+    .choice { text-align: left; background: transparent; border: 1px solid rgba(28, 25, 23, 0.28); padding: 8px 12px; }
+    #status { margin-top: 12px; font-size: 14px; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Unmasked</h1>
+      <p class="muted">Know what you're buying before you buy it.</p>
+    </div>
+    <span class="badge">Demo data</span>
+  </header>
+  <main>
+    <section>
+      <div class="product">
+        <div>
+          <h2 id="name">Loading the demo report…</h2>
+          <p class="muted" id="seller"></p>
+          <p id="assessment"></p>
+        </div>
+        <p class="price" id="price"></p>
+      </div>
+      <p class="muted" id="label"></p>
+      <div class="tabs" id="tabs"></div>
+      <div id="panel"></div>
+    </section>
+    <aside>
+      <h2>Unmasked AI</h2>
+      <div class="thread" id="thread"></div>
+      <div class="choices">
+        <button type="button" class="choice" data-question="Which one would you recommend based on what I've returned before?">Which one fits what I've returned before?</button>
+        <button type="button" class="choice" data-question="What's wrong with this product?">What's wrong with this product?</button>
+      </div>
+      <form class="ask" id="ask">
+        <input name="question" type="text" placeholder="Ask about this demo" autocomplete="off">
+        <button type="submit">Ask</button>
+      </form>
+      <button type="button" id="monitor">Notify me if the return policy changes</button>
+      <p id="status"></p>
+    </aside>
+  </main>
+  <script>
+    const tabs = ["Overview", "Fine print", "Claims", "Reviews", "Sustainability", "Value", "Alternatives"];
+    let report = null;
+    let current = "Overview";
+
+    function money(value) {
+      return "$" + Number(value).toFixed(2);
+    }
+
+    function card(title, body, level) {
+      const block = document.createElement("article");
+      block.className = "card";
+      const heading = document.createElement("h2");
+      heading.textContent = title;
+      const kind = document.createElement("p");
+      kind.className = "level";
+      kind.textContent = level || "";
+      const copy = document.createElement("p");
+      copy.textContent = body;
+      block.append(heading, kind, copy);
+      return block;
+    }
+
+    function render() {
+      document.getElementById("name").textContent = report.product.name;
+      document.getElementById("seller").textContent = report.product.brand + " · " + report.product.seller;
+      document.getElementById("assessment").textContent = report.assessment;
+      document.getElementById("price").textContent = money(report.product.price);
+      document.getElementById("label").textContent = report.label;
+      const panel = document.getElementById("panel");
+      panel.replaceChildren();
+      if (current === "Overview") {
+        report.concerns.forEach((item) => panel.append(finding(item)));
+        panel.append(card("Coverage", report.coverage, "what this demo includes"));
+      } else if (current === "Fine print") {
+        report.concerns.forEach((item) => panel.append(finding(item)));
+      } else if (current === "Claims") {
+        const claim = report.claim;
+        const block = card(claim.text, claim.verdict + ". " + claim.explanation, claim.evidenceLevel);
+        const quote = document.createElement("blockquote");
+        quote.textContent = claim.quotation;
+        block.append(quote);
+        panel.append(block);
+      } else if (current === "Reviews") {
+        const review = report.review;
+        panel.append(card(review.category, review.reports + " fixture reviews. " + review.excerpt + " " + review.limitation, review.evidenceLevel));
+      } else if (current === "Sustainability") {
+        const item = report.environment;
+        panel.append(card("Environmental finding", item.finding, item.evidenceLevel));
+      } else if (current === "Value") {
+        panel.append(card("Price", report.value.finding, report.value.evidenceLevel));
+      } else {
+        report.alternatives.forEach((item) => {
+          const block = document.createElement("article");
+          block.className = "alt" + (item.recommended ? " recommended" : "");
+          const title = document.createElement("h2");
+          title.textContent = item.name + " · " + money(item.price);
+          const why = document.createElement("p");
+          why.textContent = item.why + " Addresses: " + item.addresses;
+          const tradeoff = document.createElement("p");
+          tradeoff.className = "muted";
+          tradeoff.textContent = item.tradeoff;
+          block.append(title, why, tradeoff);
+          panel.append(block);
+        });
+      }
+    }
+
+    function finding(item) {
+      const block = card(item.category, item.explanation + " " + item.action, item.evidenceLevel + " · " + item.severity);
+      const quote = document.createElement("blockquote");
+      quote.textContent = item.quotation;
+      block.append(quote);
+      return block;
+    }
+
+    function say(role, text) {
+      const line = document.createElement("p");
+      line.className = role === "you" ? "you" : "agent";
+      line.textContent = text;
+      const thread = document.getElementById("thread");
+      thread.append(line);
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    async function ask(question) {
+      say("you", question);
+      const response = await fetch("/demo/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const payload = await response.json();
+      say("agent", payload.answer);
+    }
+
+    document.getElementById("tabs").append(...tabs.map((name) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = name;
+      button.setAttribute("aria-pressed", name === current ? "true" : "false");
+      button.addEventListener("click", () => {
+        current = name;
+        document.querySelectorAll(".tabs button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+        render();
+      });
+      return button;
+    }));
+
+    document.getElementById("ask").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = event.target.elements.question;
+      const question = input.value.trim();
+      if (!question) return;
+      input.value = "";
+      ask(question);
+    });
+    document.querySelectorAll(".choice").forEach((button) => {
+      button.addEventListener("click", () => ask(button.dataset.question));
+    });
+    document.getElementById("monitor").addEventListener("click", async () => {
+      const response = await fetch("/demo/monitors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product: report.product.name }),
+      });
+      const payload = await response.json();
+      document.getElementById("status").textContent = payload.message;
+    });
+
+    fetch("/demo/report")
+      .then((response) => response.json())
+      .then((payload) => {
+        report = payload;
+        render();
+        say("agent", "This is the Harbor Headphones demo. Ask which model fits what you returned before.");
+      })
+      .catch(() => {
+        document.getElementById("name").textContent = "The demo report did not load.";
+      });
+  </script>
+</body>
+</html>

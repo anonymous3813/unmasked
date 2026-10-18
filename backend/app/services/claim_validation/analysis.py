@@ -67,12 +67,28 @@ class ClaimAnalysisService:
         )
 
 
-def _alternative_reviews(search, product_name: str) -> list[ClaimEvidence]:
+def recommend_alternatives(product_name: str, search, complete=None) -> list[ProductRecommendation]:
+    """Recommend greener and better-value products named by reviews.
+
+    A card is kept only when the review names that other product and a price.
+    """
+    evidence = _aspect_reviews(search, product_name, _ASPECT_QUERIES[:2])
+    if not evidence:
+        return []
+    complete = complete or GeminiClient().complete
+    return [
+        item
+        for item in _recommendations(complete(_prompt(product_name, [], evidence)), evidence, product_name)
+        if item.aspect in {ComparisonAspect.ENVIRONMENTAL, ComparisonAspect.COST_VALUE}
+    ]
+
+
+def _aspect_reviews(search, product_name: str, queries) -> list[ClaimEvidence]:
     search = search or TavilyClient().search
     retrieved_at = datetime.now(timezone.utc)
     seen: set[str] = set()
     evidence: list[ClaimEvidence] = []
-    for _aspect, phrase in _ASPECT_QUERIES:
+    for _aspect, phrase in queries:
         for hit in search(f'"{product_name}" {phrase} reviews'):
             url = str(hit.get("url") or "").strip()
             quotation = str(hit.get("content") or "").strip()
@@ -91,6 +107,10 @@ def _alternative_reviews(search, product_name: str) -> list[ClaimEvidence]:
                 )
             )
     return evidence
+
+
+def _alternative_reviews(search, product_name: str) -> list[ClaimEvidence]:
+    return _aspect_reviews(search, product_name, _ASPECT_QUERIES)
 
 
 def _prompt(
@@ -156,7 +176,6 @@ def _recommendations(
             or name.lower() == product_name.lower()
             or quotation not in source.quotation
             or name.lower() not in source.quotation.lower()
-            or source.image_url is None
             or _listed_price(source.quotation) is None
         ):
             continue
