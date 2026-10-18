@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Alpine Jacket</title>
+  <style>
+    body { margin: 0; font-family: Georgia, serif; color: #1c1917; background: #f4f1ea; }
+    main { max-width: 640px; margin: 48px auto 120vh; padding: 0 24px 80vh; }
+    h1 { font-weight: 500; font-size: 40px; margin-bottom: 8px; }
+    .price { font-size: 28px; margin: 0 0 16px; }
+    button { font: inherit; font-size: 16px; padding: 10px 16px; background: #1c1917; color: #fffaf3; border: 0; }
+    .shipping { margin-top: 24px; }
+    .later { margin-top: 90vh; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Alpine Jacket</h1>
+    <p class="price">$120.00</p>
+    <button type="button">Add to cart</button>
+    <p class="shipping">Sold by Northwind Outfitters. Free shipping on orders over $50. Returns within the first week if unworn.</p>
+    <p>Customers say the cuffs stay dry, but one reviewer gave it 3 out of 5 stars after the zipper snagged.</p>
+    <p>Material: recycled wool</p>
+    <p><a href="https://shop.example/pages/warranty">Warranty document</a></p>
+    <details>
+      <summary>Warranty</summary>
+      <p>The warranty excludes damage from normal wear after the first year of use.</p>
+    </details>
+    <section class="later">
+      <h2>Shipping damage</h2>
+      <p>Report damage after the package arrives.</p>
+    </section>
+  </main>
+  <script src="vendor/react.production.min.js"></script>
+  <script src="vendor/react-dom.production.min.js"></script>
+  <script src="src/chat-ui.js"></script>
+  <script src="src/overlay.js"></script>
+  <script>
+    UnmaskedOverlay.mountChat();
+    UnmaskedOverlay.beginReading();
+    setTimeout(function () {
+    UnmaskedOverlay.showSources([
+      {
+        site: "allbirds.com",
+        title: "Returns and exchanges",
+        url: "https://www.allbirds.com/pages/returns-exchanges",
+        reason: "Policy page"
+      },
+      {
+        site: "runrepeat.com",
+        title: "Allbirds Tree Runner review",
+        url: "https://runrepeat.com/allbirds-tree-runner",
+        reason: "Reviews of the seller's claim"
+      }
+    ]);
+    UnmaskedOverlay.showDossier({
+      seller: { detail: "Sold by Northwind Outfitters" },
+      reviews: [{ quote: "Customers say the cuffs stay dry, but one reviewer gave it 3 out of 5 stars after the zipper snagged.", source: "This page", url: "" }],
+      documents: [{ title: "Warranty document", url: "https://shop.example/pages/warranty", excerpt: "The warranty excludes damage from normal wear after the first year of use." }],
+      specs: [{ label: "Material", value: "recycled wool" }]
+    });
+    UnmaskedOverlay.showSummary({
+      title: "Alpine Jacket",
+      url: "https://shop.example/products/alpine-jacket",
+      store: "shop.example",
+      listedPrice: "120.00",
+      pageText: document.body.innerText,
+      price: {
+        message: "California's average combined sales tax is 8.80%, about $10.20 on $120.00. The city or county rate in Sacramento can differ from that average."
+      },
+      notes: [
+        {
+          title: "Return limit",
+          message: "This product can only be returned the first week. Items must be unworn."
+        },
+        {
+          title: "Damage policy",
+          message: "Unreported shipping damage becomes the shopper's bill. Report shipping damage within 48 hours."
+        }
+      ]
+    });
+    UnmaskedOverlay.ask = (question) =>
+      fetch("http://127.0.0.1:8000/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          url: "https://shop.example/products/alpine-jacket",
+          title: document.title,
+          page_text: document.body.innerText.slice(0, 4000),
+          notes: [
+            {
+              title: "Return limit",
+              message: "This product can only be returned the first week. Items must be unworn."
+            }
+          ],
+          visits: []
+        })
+      })
+        .then((response) => response.json());
+    UnmaskedOverlay.loadInbox = () => fetch("http://127.0.0.1:8000/inbox").then((response) => response.json());
+    UnmaskedOverlay.sendInbox = (text, items) =>
+      fetch("http://127.0.0.1:8000/inbox/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, cart: items || [] })
+      }).then((response) => response.json());
+    UnmaskedOverlay.startCall = (items) =>
+      fetch("http://127.0.0.1:8000/inbox/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cart: items || [] })
+      }).then((response) => response.json());
+    UnmaskedOverlay.purchase = (items) =>
+      fetch("http://127.0.0.1:8000/cart/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items })
+      }).then((response) => response.json());
+    fetch("http://127.0.0.1:8000/assistant")
+      .then((response) => response.json())
+      .then((profile) => UnmaskedOverlay.setAssistant(profile));
+    UnmaskedOverlay.showReport({
+      responseId: "preview-alpine",
+      summary: "Material information is available, but product-level emissions are unverified.",
+      demo: false,
+      blocks: [
+        {
+          type: "summary_card",
+          verdict: "Material information is available, but product-level emissions are unverified.",
+          why: "Material information alone is insufficient to calculate a defensible footprint."
+        },
+        {
+          type: "sustainability_report",
+          title: "Environmental analysis",
+          status: "insufficient_evidence",
+          findings: [
+            { label: "Material", value: "recycled wool", status: "manufacturer_claim", sourceIds: ["src-1"] }
+          ]
+        },
+        {
+          type: "missing_evidence",
+          metric: "product_carbon_footprint",
+          reason: "Carbon footprint not verified. No verified product-specific CO2e measurement was found."
+        },
+        { type: "source_list", sourceIds: ["src-1"] }
+      ],
+      sources: [
+        {
+          id: "src-1",
+          title: "This page",
+          url: "https://shop.example/products/alpine-jacket",
+          domain: "shop.example",
+          retrievedAt: null,
+          excerpt: "Material: recycled wool",
+          sourceClass: "manufacturer",
+          productSpecific: true
+        }
+      ],
+      suggestedActions: [
+        { type: "save_product", label: "Save product", url: "https://shop.example/products/alpine-jacket" },
+        { type: "open_source", label: "View shop.example", url: "https://shop.example/products/alpine-jacket" }
+      ],
+      followUps: ["What are the materials?"]
+    });
+    UnmaskedOverlay.reveal();
+    }, 2200);
+  </script>
+</body>
+</html>

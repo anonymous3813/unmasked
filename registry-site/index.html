@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unmasked — Agent registry</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #0f3d2a;
+      --leaf: #21613d;
+      --ink: #1b1f1d;
+      --gold: #c6a15b;
+      --paper: #f7f4ee;
+      --white: #fff;
+      --line: rgba(27, 31, 29, 0.14);
+      --muted: rgba(27, 31, 29, 0.72);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 18px/1.5 "Source Sans 3", "Segoe UI", sans-serif;
+    }
+    a { color: inherit; }
+    img { max-width: 100%; }
+    .skip {
+      position: absolute;
+      left: 12px;
+      top: -40px;
+      background: var(--white);
+      padding: 8px 12px;
+    }
+    .skip:focus { top: 12px; }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 28px;
+      background: var(--white);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--leaf);
+      font-weight: 700;
+      line-height: 1.05;
+    }
+    .brand svg { display: block; }
+    .actions { display: flex; gap: 10px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: 2px solid var(--green);
+      background: var(--white);
+      color: var(--green);
+      font: 700 15px/1 "Source Sans 3", sans-serif;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .btn.fill { background: var(--green); color: var(--white); }
+    .btn.light { border-color: var(--white); color: var(--white); background: transparent; }
+    .btn.solid { background: var(--white); color: var(--green); border-color: var(--white); }
+    .hero {
+      background: var(--green);
+      color: var(--white);
+      padding: 28px 28px 48px;
+    }
+    .bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    .nav { display: flex; gap: 22px; }
+    .nav a { color: var(--white); text-decoration: none; font-weight: 600; font-size: 15px; }
+    .nav a:hover { text-decoration: underline; }
+    .finder {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--white);
+    }
+    .finder input {
+      width: 220px;
+      border: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.55);
+      background: transparent;
+      color: var(--white);
+      font: inherit;
+      padding: 6px 0;
+    }
+    .finder input::placeholder { color: rgba(255, 255, 255, 0.7); }
+    .menu {
+      display: none;
+      background: transparent;
+      color: var(--white);
+      border: 0;
+      font: 700 15px/1 "Source Sans 3", sans-serif;
+      cursor: pointer;
+    }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 14px;
+      letter-spacing: 0.14em;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 36px;
+      height: 3px;
+      background: var(--gold);
+    }
+    h1, h2, h3 { font-family: Merriweather, Georgia, serif; font-weight: 700; letter-spacing: -0.02em; }
+    h1 { margin: 0 0 16px; font-size: clamp(36px, 5vw, 64px); line-height: 1.12; max-width: 12ch; }
+    .lede { max-width: 38rem; margin: 0 0 28px; font-size: 21px; line-height: 1.45; color: rgba(255, 255, 255, 0.92); }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 36px; }
+    .ledger {
+      background: var(--paper);
+      color: var(--ink);
+      padding: 22px 22px 8px;
+      max-width: 920px;
+    }
+    .ledger h2 { margin: 0 0 6px; font-size: 28px; }
+    .quiet { margin: 0 0 12px; color: var(--muted); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 72px 28px; }
+    .split { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 40px; align-items: start; }
+    h2 { margin: 0 0 12px; font-size: clamp(32px, 4vw, 48px); line-height: 1.15; }
+    .kicker { margin: 0 0 8px; color: var(--leaf); font-weight: 700; letter-spacing: 0.08em; font-size: 13px; text-transform: uppercase; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .card {
+      background: var(--white);
+      border-top: 3px solid var(--gold);
+      padding: 18px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 22px; }
+    .card p, .step p { margin: 0; color: var(--muted); }
+    .band { background: var(--white); }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+    .stat strong {
+      display: block;
+      font-family: Merriweather, Georgia, serif;
+      font-size: clamp(40px, 5vw, 64px);
+      line-height: 1;
+      color: var(--green);
+    }
+    .stat span { display: block; margin-top: 8px; }
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+    .filters button {
+      font: 700 14px/1 "Source Sans 3", sans-serif;
+      border: 1px solid var(--line);
+      background: transparent;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    .filters button[aria-pressed="true"] { background: var(--green); color: var(--white); border-color: var(--green); }
+    table { width: 100%; border-collapse: collapse; background: var(--white); }
+    th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+    td a { color: var(--leaf); }
+    .kind { font-weight: 700; color: var(--green); }
+    .steps { display: grid; gap: 18px; }
+    .step { display: grid; grid-template-columns: 48px 1fr; gap: 12px; }
+    .num {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      background: var(--green);
+      color: var(--white);
+      font-family: Merriweather, Georgia, serif;
+      font-size: 22px;
+    }
+    footer { background: var(--green); color: var(--white); padding: 48px 28px 24px; }
+    .foot {
+      max-width: 1120px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1.4fr repeat(3, 1fr);
+      gap: 24px;
+    }
+    footer a { color: var(--white); }
+    footer h3 { font-family: "Source Sans 3", sans-serif; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; }
+    footer ul { list-style: none; margin: 0; padding: 0; }
+    footer li { margin: 8px 0; }
+    .legal { max-width: 1120px; margin: 28px auto 0; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.2); font-size: 14px; }
+    .signin { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 16px; }
+    .signin label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+    .signin input { min-width: 220px; min-height: 44px; border: 2px solid var(--green); border-radius: 8px; padding: 8px 12px; font: inherit; background: var(--white); }
+    .purchase-list { display: grid; gap: 12px; margin-top: 16px; }
+    .purchase { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
+    .purchase h3 { margin: 0 0 6px; font-family: Merriweather, Georgia, serif; font-size: 22px; }
+    .purchase p { margin: 0 0 4px; }
+    #signout { margin-top: 16px; }
+    #chamber { margin: 8px 0 24px; padding: 22px; border-radius: 18px; background: var(--green); color: var(--white); }
+    #chamber[hidden] { display: none; }
+    .table-scene { position: relative; height: 390px; max-width: 560px; margin: 0 auto; }
+    .round-table { position: absolute; left: 50%; top: 54%; width: 170px; height: 170px; margin: -85px 0 0 -85px; border-radius: 50%; background: #143d28; border: 10px solid var(--gold); }
+    .proposal { position: absolute; left: 50%; top: 54%; width: 130px; margin: -30px 0 0 -65px; text-align: center; font-size: 14px; }
+    .seat { position: absolute; left: 50%; top: 54%; width: 116px; margin-left: -58px; text-align: center; transform: rotate(calc(var(--i) * 72deg)) translateY(-150px) rotate(calc(var(--i) * -72deg)); }
+    .seat strong, .seat small { display: block; }
+    .seat small { font-size: 12px; opacity: 0.8; }
+    .seat em { font-style: normal; display: inline-block; margin-top: 4px; padding: 2px 8px; border-radius: 999px; background: var(--white); color: var(--green); font-size: 12px; font-weight: 700; }
+    .seat.no em { background: #e07a4c; color: #1b1f1d; }
+    .tale { min-height: 150px; font-family: Merriweather, Georgia, serif; font-size: 22px; line-height: 1.45; }
+    .tale span { display: block; margin-bottom: 10px; font-family: "Source Sans 3", sans-serif; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .decision { margin: 0; font-family: Merriweather, Georgia, serif; font-size: 32px; }
+    #chamber .btn { margin-top: 18px; }
+    @media (max-width: 800px) {
+      .nav { display: none; }
+      .nav.open { display: flex; flex-direction: column; gap: 12px; position: absolute; left: 0; right: 0; top: 100%; background: var(--green); padding: 8px 0 16px; z-index: 2; }
+      .menu { display: inline-flex; }
+      .bar { position: relative; z-index: 3; }
+      .finder input { width: 120px; }
+      .split, .cards, .stats, .foot { grid-template-columns: 1fr; }
+      h1 { max-width: none; }
+      table, thead, tbody, th, td, tr { display: block; }
+      thead { display: none; }
+      tr { padding: 8px 0; border-bottom: 1px solid var(--line); }
+      td { border: 0; padding: 4px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#registry">Skip to the registry</a>
+  <header class="top">
+    <a class="brand" href="#top">
+      <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
+        <circle cx="18" cy="18" r="16" fill="none" stroke="#21613d" stroke-width="2"></circle>
+        <path d="M8 18c3-5 6.5-7.5 10-7.5S25 13 28 18c-3 5-6.5 7.5-10 7.5S11 23 8 18z" fill="none" stroke="#0f3d2a" stroke-width="2"></path>
+        <circle cx="18" cy="18" r="2.5" fill="#0f3d2a"></circle>
+      </svg>
+      Unmasked
+    </a>
+    <div class="actions">
+      <a class="btn" href="#install">Install</a>
+      <a class="btn fill" href="/extension.zip">Download</a>
+    </div>
+  </header>
+  <section class="hero" id="top">
+    <div class="bar">
+      <button class="menu" type="button" aria-expanded="false" aria-controls="nav">Menu</button>
+      <nav class="nav" id="nav" aria-label="Main">
+        <a href="#agent">The agent</a>
+        <a href="#purchases">Purchases</a>
+        <a href="#wishlist">Wishlist</a>
+        <a href="#registry">Registry</a>
+        <a href="#install">Install</a>
+      </nav>
+      <label class="finder">Search
+        <input id="query" type="search" placeholder="Filter the log" autocomplete="off">
+      </label>
+    </div>
+    <p class="eyebrow">Shopping agent</p>
+    <h1>See what the agent checked before you buy</h1>
+    <p class="lede">Unmasked stays on the product page. It reads return limits, warranty exclusions, and review-backed alternatives, then keeps every message, call, and order in one registry.</p>
+    <div class="hero-actions">
+      <a class="btn solid" href="/extension.zip">Download the extension</a>
+      <a class="btn light" href="#registry">Open the registry</a>
+    </div>
+    <div class="ledger" id="preview" aria-live="polite"></div>
+  </section>
+  <section class="wrap" id="agent">
+    <p class="kicker">On the product page</p>
+    <div class="split">
+      <h2>The same assistant, in the page chat</h2>
+      <div class="cards">
+        <article class="card">
+          <h3>Concerns</h3>
+          <p>The chat opens with the return, warranty, damage, and environmental summary for the page you are on.</p>
+        </article>
+        <article class="card">
+          <h3>Messages and calls</h3>
+          <p>Ask about the cart or an order from the same thread the assistant uses for messages and calls.</p>
+        </article>
+        <article class="card">
+          <h3>Review picks</h3>
+          <p>When a review names another product, with a price and a photo, that product shows up as a card.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+  <section class="band">
+    <div class="wrap">
+      <p class="kicker">The registry so far</p>
+      <div class="stats" id="stats"></div>
+    </div>
+  </section>
+  <section class="wrap" id="purchases">
+    <p class="kicker">After you buy</p>
+    <h2>Your products, scores, and delivery</h2>
+    <p class="quiet">Sign in to see purchases saved in Supabase. The environment footprint is the average score of those products. Delivery status is the assistant's record, and a Photon text goes out when it changes.</p>
+    <form class="signin" id="signin">
+      <label>Your name
+        <input id="shopper-name" name="name" type="text" autocomplete="name" required>
+      </label>
+      <button class="btn fill" type="submit">Sign in</button>
+    </form>
+    <div id="account" hidden>
+      <p id="hello"></p>
+      <p id="footprint"></p>
+      <div class="purchase-list" id="purchase-cards"></div>
+      <button class="btn" type="button" id="signout">Sign out</button>
+    </div>
+  </section>
+  <section class="wrap" id="wishlist">
+    <p class="kicker">Saved from the agent</p>
+    <h2>Wishlist</h2>
+    <p class="quiet">Products you save from the chat are listed here. Saving one sends a Photon 2.0 text when the agent user and space are set.</p>
+    <div class="purchase-list" id="wishlist-cards"><p>No saved products yet.</p></div>
+  </section>
+  <section class="wrap" id="registry">
+    <p class="kicker">Agent registry</p>
+    <h2>Logs</h2>
+    <p class="quiet" id="updated">Loading the registry…</p>
+    <div id="chamber" hidden></div>
+    <div class="filters" role="group" aria-label="Log type">
+      <button type="button" data-kind="all" aria-pressed="true">All</button>
+      <button type="button" data-kind="page" aria-pressed="false">Pages</button>
+      <button type="button" data-kind="message" aria-pressed="false">Messages</button>
+      <button type="button" data-kind="call" aria-pressed="false">Calls</button>
+      <button type="button" data-kind="order" aria-pressed="false">Orders</button>
+      <button type="button" data-kind="ask" aria-pressed="false">Questions</button>
+    </div>
+    <table id="registry-table">
+      <thead>
+        <tr><th>When</th><th>Type</th><th>What happened</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+  <section class="wrap" id="install">
+    <p class="kicker">Get the extension</p>
+    <div class="split">
+      <div>
+        <h2>Add Unmasked to Chrome</h2>
+        <p>The download is the unpacked extension. Load that folder, then use Ask on the product page.</p>
+      </div>
+      <ol class="steps">
+        <li class="step"><span class="num">1</span><p><a href="/extension.zip">Download the extension</a> and unzip it.</p></li>
+        <li class="step"><span class="num">2</span><p>Open <code>chrome://extensions</code> and turn on Developer mode.</p></li>
+        <li class="step"><span class="num">3</span><p>Choose Load unpacked and select the <code>unmasked</code> folder.</p></li>
+        <li class="step"><span class="num">4</span><p>Open a product page. The chat on the page is the agent. This site has no toolbar popup.</p></li>
+      </ol>
+    </div>
+  </section>
+  <footer>
+    <div class="foot">
+      <div>
+        <strong>Unmasked</strong>
+        <p>A shopping agent for the product page you already have open.</p>
+      </div>
+      <div>
+        <h3>The agent</h3>
+        <ul>
+          <li><a href="#agent">Page chat</a></li>
+          <li><a href="#registry">Registry</a></li>
+          <li><a href="/demo">Sample product report</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Install</h3>
+        <ul>
+          <li><a href="/extension.zip">Download</a></li>
+          <li><a href="#install">Load unpacked</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Registry</h3>
+        <ul>
+          <li><a href="#registry">Messages</a></li>
+          <li><a href="#registry">Calls</a></li>
+          <li><a href="#registry">Orders</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="legal">© 2026 Unmasked. The registry shows activity from the assistant running on this computer.</p>
+  </footer>
+  <script>
+    const labels = { page: "Page", ask: "Question", message: "Message", call: "Call", order: "Order", intro: "Text" };
+    const statLabels = [
+      ["page", "pages checked"],
+      ["message", "messages"],
+      ["call", "calls"],
+      ["order", "orders"]
+    ];
+    let entries = [];
+    let kind = "all";
+    const seenVotes = new Set();
+    let primed = false;
+    let playing = false;
+    let voteTimer = 0;
+    let finishVote = function () {};
+
+    const menu = document.querySelector(".menu");
+    const nav = document.getElementById("nav");
+    menu.addEventListener("click", () => {
+      const open = nav.classList.toggle("open");
+      menu.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    document.getElementById("query").addEventListener("input", render);
+    document.querySelectorAll(".filters button").forEach((button) => {
+      button.addEventListener("click", () => {
+        kind = button.dataset.kind;
+        document.querySelectorAll(".filters button").forEach((item) => {
+          item.setAttribute("aria-pressed", item === button ? "true" : "false");
+        });
+        render();
+      });
+    });
+
+    function visible() {
+      const query = document.getElementById("query").value.trim().toLowerCase();
+      return entries.filter((entry) => {
+        const haystack = (entry.title + " " + entry.detail + " " + entry.url).toLowerCase();
+        return (kind === "all" || entry.kind === kind) && (!query || haystack.includes(query));
+      });
+    }
+
+    function when(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+
+    function line(entry) {
+      const link = entry.url ? ` <a href="${escape(entry.url)}">${escape(host(entry.url))}</a>` : "";
+      return `<strong>${escape(entry.title)}</strong>${link}<br>${escape(entry.detail)}`;
+    }
+
+    function host(url) {
+      try { return new URL(url).host; } catch (error) { return "Open"; }
+    }
+
+    function escape(value) {
+      return String(value || "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[char]));
+    }
+
+    function render() {
+      const rows = visible();
+      const body = document.getElementById("rows");
+      body.innerHTML = rows.length
+        ? rows.map((entry) => `<tr><td>${when(entry.at)}</td><td class="kind">${labels[entry.kind] || "Log"}</td><td>${line(entry)}</td></tr>`).join("")
+        : `<tr><td colspan="3">Nothing is in the registry yet. Download the extension and open a product page.</td></tr>`;
+      document.getElementById("preview").innerHTML = `
+        <h2>Latest activity</h2>
+        ${entries.slice(0, 4).map((entry) => `<p><span class="kind">${labels[entry.kind] || "Log"}.</span> ${escape(entry.title)}${entry.detail ? " — " + escape(entry.detail) : ""}</p>`).join("") || "<p class='quiet'>No activity yet.</p>"}
+        <p><a href="#registry">See the full registry →</a></p>`;
+    }
+
+    function paint(payload) {
+      entries = Array.isArray(payload.entries) ? payload.entries : [];
+      const counts = payload.counts || {};
+      document.getElementById("stats").innerHTML = statLabels.map(([key, label]) =>
+        `<p class="stat"><strong>${counts[key] || 0}</strong><span>${label}</span></p>`
+      ).join("");
+      considerVote();
+      if (!playing) {
+        document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+        render();
+      }
+    }
+
+    function considerVote() {
+      const pending = entries.find((entry) => entry.ballot && entry.ballot.rounds && !seenVotes.has(entry.id));
+      if (!primed) {
+        primed = true;
+        const recent = Boolean(pending) && Date.now() - new Date(pending.at).getTime() < 20000;
+        entries.forEach((entry) => {
+          if (!recent || entry.id !== pending.id) seenVotes.add(entry.id);
+        });
+        if (recent) playVote(pending);
+        return;
+      }
+      if (pending && !playing) playVote(pending);
+    }
+
+    function seats(entry, round, heading) {
+      const agents = (round && round.agents) || [];
+      return `<p class="kicker">${escape(heading)}</p>
+        <div class="table-scene">
+          <div class="round-table"></div>
+          <p class="proposal">${escape(entry.title)}</p>
+          ${agents.map((agent, index) => `<div class="seat ${agent.vote === "yes" ? "yes" : "no"}" style="--i:${index}"><strong>${escape(agent.name)}</strong><small>${escape(agent.role)}</small><em>${agent.vote === "yes" ? "Yes" : "No"}</em></div>`).join("")}
+        </div>`;
+    }
+
+    function tale(agent, heading) {
+      return `<p class="kicker">${escape(heading)}</p>
+        <p class="tale"><span>${escape(agent.name)}, ${escape(agent.role)}</span>${escape(agent.story)}</p>
+        <button class="btn light" type="button" id="skip-vote">Skip to the decision</button>`;
+    }
+
+    function playVote(entry) {
+      const chamber = document.getElementById("chamber");
+      const table = document.getElementById("registry-table");
+      const ballot = entry.ballot || {};
+      const rounds = ballot.rounds || [];
+      playing = true;
+      chamber.hidden = false;
+      table.hidden = true;
+      document.getElementById("updated").textContent = "The other agents are voting before this line enters the registry.";
+      clearTimeout(voteTimer);
+      const steps = [];
+      if (rounds[0]) steps.push(() => { chamber.innerHTML = seats(entry, rounds[0], "First vote"); });
+      ((rounds[0] && rounds[0].agents) || []).forEach((agent) => {
+        steps.push(() => { chamber.innerHTML = tale(agent, "First accounts"); });
+      });
+      if (rounds[1]) steps.push(() => { chamber.innerHTML = seats(entry, rounds[1], "Second vote"); });
+      ((rounds[1] && rounds[1].agents) || []).forEach((agent) => {
+        steps.push(() => { chamber.innerHTML = tale(agent, "After they had heard each other"); });
+      });
+      steps.push(() => {
+        chamber.innerHTML = `<p class="decision">${escape(ballot.decision || "The table reached a decision.")}</p>`;
+      });
+      let step = 0;
+      function advance() {
+        if (!playing) return;
+        if (step >= steps.length) {
+          finishVote();
+          return;
+        }
+        steps[step]();
+        step += 1;
+        voteTimer = setTimeout(advance, step === 1 ? 1800 : 2600);
+      }
+      finishVote = function () {
+        if (!playing) return;
+        playing = false;
+        clearTimeout(voteTimer);
+        seenVotes.add(entry.id);
+        chamber.hidden = true;
+        chamber.innerHTML = "";
+        table.hidden = false;
+        document.getElementById("updated").textContent = "Updated " + new Date().toLocaleTimeString();
+        render();
+      };
+      advance();
+    }
+
+    document.getElementById("chamber").addEventListener("click", (event) => {
+      if (event.target && event.target.id === "skip-vote") finishVote();
+    });
+
+    async function load() {
+      try {
+        const response = await fetch("/registry");
+        paint(await response.json());
+      } catch (error) {
+        document.getElementById("updated").textContent = "The registry is not reachable right now.";
+      }
+    }
+    const NAME_KEY = "unmaskedShopper";
+    const signin = document.getElementById("signin");
+    const account = document.getElementById("account");
+    const shopperName = document.getElementById("shopper-name");
+
+    function signedIn() {
+      return localStorage.getItem(NAME_KEY) || "";
+    }
+
+    function showAccount() {
+      const name = signedIn();
+      signin.hidden = Boolean(name);
+      account.hidden = !name;
+      if (name) document.getElementById("hello").textContent = "Signed in as " + name + ".";
+    }
+
+    function paintPurchases(payload) {
+      const cards = document.getElementById("purchase-cards");
+      const orders = payload && Array.isArray(payload.orders) ? payload.orders : [];
+      const footprint = payload && payload.footprint;
+      document.getElementById("footprint").textContent = footprint == null
+        ? "No purchases yet, so there is no environment footprint."
+        : "Your environment footprint is " + footprint + " out of 100, the average score of the products you bought.";
+      cards.innerHTML = orders.length
+        ? orders.map((order) => `<article class="purchase"><h3>${escape(order.name)}</h3><p>${escape(order.store || "Store")} · $${escape(order.price || "")}</p><p>Environment score ${order.environmentScore == null ? "not scored" : escape(order.environmentScore) + " out of 100"}</p><p>${escape(order.materials || "")}</p><p><strong>${escape(order.status || "Placed")}</strong> — ${escape(order.statusNote || "")}</p></article>`).join("")
+        : "<p>No purchases yet. Add a product in the page chat and choose Purchase all.</p>";
+    }
+
+    function paintWishlist(payload) {
+      const cards = document.getElementById("wishlist-cards");
+      const items = payload && Array.isArray(payload.items) ? payload.items : [];
+      cards.innerHTML = items.length
+        ? items.map((item) => `<article class="purchase"><h3>${escape(item.name)}</h3><p>${escape(item.store || "Store")} · $${escape(item.price || "")}</p><p><a href="${escape(item.url)}">Open the product</a></p></article>`).join("")
+        : "<p>No saved products yet. Choose Wishlist on a recommended product in the page chat.</p>";
+    }
+
+    async function loadWishlist() {
+      try {
+        const response = await fetch("/wishlist");
+        paintWishlist(await response.json());
+      } catch (error) {
+        document.getElementById("wishlist-cards").innerHTML = "<p>The wishlist is not reachable right now.</p>";
+      }
+    }
+
+    async function loadPurchases() {
+      if (!signedIn()) return;
+      try {
+        const response = await fetch("/purchases");
+        paintPurchases(await response.json());
+      } catch (error) {
+        document.getElementById("footprint").textContent = "Purchases are not reachable right now.";
+      }
+    }
+
+    signin.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = shopperName.value.trim();
+      if (!name) return;
+      localStorage.setItem(NAME_KEY, name);
+      showAccount();
+      loadPurchases();
+    });
+    document.getElementById("signout").addEventListener("click", () => {
+      localStorage.removeItem(NAME_KEY);
+      showAccount();
+    });
+    showAccount();
+
+    load();
+    loadPurchases();
+    loadWishlist();
+    setInterval(() => {
+      load();
+      loadPurchases();
+      loadWishlist();
+    }, 4000);
+  </script>
+</body>
+</html>

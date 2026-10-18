@@ -14,12 +14,21 @@ class ClaimVerdict(str, Enum):
     INCONCLUSIVE = "inconclusive"
 
 
+class ComparisonAspect(str, Enum):
+    """Shopper concerns used when recommending another product."""
+
+    ENVIRONMENTAL = "environmental"
+    COST_VALUE = "cost_value"
+    DURABILITY = "durability"
+
+
 class ProductClaim(BaseModel):
-    """A product claim received from the existing extraction pipeline."""
+    """A claim the seller makes about a product."""
 
     claim_text: str = Field(min_length=1)
     product_name: str = Field(min_length=1)
     source_url: HttpUrl
+    category: str | None = None
 
 
 class ClaimEvidence(BaseModel):
@@ -29,6 +38,7 @@ class ClaimEvidence(BaseModel):
     title: str = Field(min_length=1)
     quotation: str = Field(min_length=1)
     retrieved_at: datetime
+    image_url: HttpUrl | None = None
 
 
 class ClaimValidationResult(BaseModel):
@@ -39,3 +49,25 @@ class ClaimValidationResult(BaseModel):
     explanation: str = Field(min_length=1)
     evidence: list[ClaimEvidence]
     validated_at: datetime
+
+
+class ProductRecommendation(BaseModel):
+    """Another product a review supports on one shopper concern."""
+
+    product_name: str = Field(min_length=1)
+    aspect: ComparisonAspect
+    reason: str = Field(min_length=1)
+    source_url: HttpUrl
+    evidence_quotation: str = Field(min_length=1)
+    product_url: HttpUrl
+    image_url: HttpUrl | None = None
+    price: str = Field(min_length=1)
+
+
+class ClaimAnalysis(BaseModel):
+    """Claim verdicts plus other products the reviews support."""
+
+    product_name: str = Field(min_length=1)
+    validations: list[ClaimValidationResult]
+    recommendations: list[ProductRecommendation]
+    analyzed_at: datetime

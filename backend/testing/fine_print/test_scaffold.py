@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from backend.app.integrations.groq_client import GroqClient
+from backend.app.integrations.gemini_client import GeminiClient
 from backend.app.integrations.supabase_client import SupabaseClient
 from backend.app.models.fine_print import (
     FinePrintAnalysisResult,
@@ -24,12 +24,12 @@ POLICY_URL = "https://example.com/policies/returns"
 def test_fine_print_scaffolds_instantiate_without_external_calls():
     extractor = FinePrintExtractor()
     analyzer = FinePrintAnalyzer()
-    groq = GroqClient()
+    gemini = GeminiClient()
     supabase = SupabaseClient()
 
     assert isinstance(extractor, FinePrintExtractor)
     assert isinstance(analyzer, FinePrintAnalyzer)
-    assert groq.api_key_env == "GROQ_API_KEY"
+    assert gemini.api_key_env == "GEMINI_API_KEY"
     assert supabase.url_env == "SUPABASE_URL"
     assert supabase.key_env == "SUPABASE_KEY"
 
