@@ -513,6 +513,43 @@ def test_delivery_status_advances_and_texts_once_per_change():
     assert "Aqua Loop is placed." in sent[0]
 
 
+def test_delivery_date_change_texts_once():
+    from backend.app.services.shop.cart import set_delivery_date
+
+    reset()
+    shopper = AgentContact()
+    shopper.open_profile("shopper", "+15551212000")
+    now = datetime(2026, 10, 17, tzinfo=timezone.utc)
+    shopper.add_order(
+        "shopper",
+        PastOrder(
+            order_id="A0001",
+            product_name="Aqua Loop",
+            product_url="https://www.walmart.com/ip/aqua/1",
+            ordered_at=now,
+            store="Walmart",
+            price="24.00",
+            delivery_date=now + timedelta(days=3),
+            notified_status="Placed",
+            notified_delivery_date=(now + timedelta(days=3)).date().isoformat(),
+        ),
+    )
+    sent = []
+
+    def send(text: str) -> dict:
+        sent.append(text)
+        return {"sent": True}
+
+    first = set_delivery_date("A0001", now + timedelta(days=6), shopper=shopper, send=send)
+    again = set_delivery_date("A0001", now + timedelta(days=6), shopper=shopper, send=send)
+
+    assert first["deliveryDate"].startswith("2026-10-23")
+    assert "now arrives" in sent[0].lower() or "Expected arrival" in sent[0]
+    assert "Aqua Loop" in sent[0]
+    assert len(sent) == 1
+    assert again["deliveryDate"].startswith("2026-10-23")
+
+
 def test_a_welcome_text_opens_an_sms_conversation(monkeypatch):
     from backend.app.integrations.photon_line import send_intro
 

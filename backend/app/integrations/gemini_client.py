@@ -8,6 +8,74 @@ import urllib.request
 from pathlib import Path
 
 
+def identify_product_image(data: bytes, mime: str = "image/jpeg") -> dict:
+    """Name a retail product from image bytes using Gemini vision."""
+    import base64
+
+    _load_local_env()
+    api_key = os.environ.get(GeminiClient.api_key_env)
+    if not api_key or not data:
+        return {}
+    media = mime if str(mime or "").startswith("image/") else "image/jpeg"
+    body = {
+        "systemInstruction": {
+            "parts": [{"text": "Return one JSON object and no other text."}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            "This is a shopper photo. Identify the retail product for shopping search. "
+                            "Do not identify people, faces, or private documents. "
+                            "If it is not a clear product, leave query empty. "
+                            'Return JSON: {"name":"product name","brand":"brand or empty","kind":"short kind",'
+                            '"query":"3-8 word store search query"}'
+                        )
+                    },
+                    {
+                        "inlineData": {
+                            "mimeType": media,
+                            "data": base64.b64encode(data).decode("ascii"),
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0,
+            "responseMimeType": "application/json",
+        },
+    }
+    primary = os.environ.get(GeminiClient.model_env) or GeminiClient.default_model
+    for model in (primary, GeminiClient.fallback_model):
+        try:
+            payload = _post_json(GeminiClient.endpoint.format(model=model), json.dumps(body).encode(), api_key)
+        except Exception:
+            continue
+        raw = _message_text(payload)
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end <= start:
+            continue
+        try:
+            parsed = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        result = {
+            "name": str(parsed.get("name") or "").strip()[:120],
+            "brand": str(parsed.get("brand") or "").strip()[:80],
+            "kind": str(parsed.get("kind") or "").strip()[:60],
+            "query": str(parsed.get("query") or "").strip()[:120],
+        }
+        if result.get("query") or result.get("name"):
+            return result
+    return {}
+
+
 class GeminiClient:
     """Gemini wrapper for semantic reasoning.
 

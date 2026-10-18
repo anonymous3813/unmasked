@@ -21,7 +21,14 @@ from backend.app.services.shop.tax import tax_note
 from backend.app.services.shop.agent import answer_question
 from backend.app.integrations.photon_line import send_intro
 from backend.app.services.shop.accounts import login, logout, register, require_user
-from backend.app.services.shop.cart import assistant, mark_returned, orders_answer, purchase, refresh_delivery
+from backend.app.services.shop.cart import (
+    assistant,
+    mark_returned,
+    orders_answer,
+    purchase,
+    refresh_delivery,
+    set_delivery_date,
+)
 from backend.app.services.shop.wishlist import add_wishlist, wishlist
 from backend.app.services.shop.inbox import inbox, place_call, send_message
 from backend.app.services.shop.marks import offer_alternatives, page_report
@@ -97,6 +104,11 @@ class AuthRequest(BaseModel):
 
 class ReturnRequest(BaseModel):
     order_id: str = ""
+
+
+class DeliveryDateRequest(BaseModel):
+    order_id: str = ""
+    delivery_date: str = ""
 
 
 class ReceiptRequest(BaseModel):
@@ -226,11 +238,11 @@ def login_account(body: AuthRequest):
 
 
 def _receive_sms(payload: dict) -> dict:
-    from backend.app.integrations.photon_line import send_to_space
+    from backend.app.integrations.photon_line import download_attachment, send_to_space
     from backend.app.services.shop.updates import sms_reply
 
     message = _incoming_message(payload)
-    text, picture = _read_content(message.get("content"))
+    text, picture, attachments = _read_content(message.get("content"))
     space = message.get("space") if isinstance(message.get("space"), dict) else {}
     space_id = str(space.get("id") or message.get("spaceId") or "")
     sender = message.get("sentBy") if isinstance(message.get("sentBy"), dict) else {}
@@ -239,7 +251,30 @@ def _receive_sms(payload: dict) -> dict:
     agent_id = str(agent.get("id") or "")
     if sender.get("kind") == "agent":
         return {"ignored": True}
-    answer = sms_reply(text, phone, picture)
+    image = b""
+    image_mime = ""
+    for item in attachments:
+        attachment_id = str(item.get("id") or "")
+        hinted = str(item.get("mime") or "")
+        data, mime = download_attachment(attachment_id)
+        if data:
+            image = data
+            image_mime = mime or hinted
+            break
+        if hinted and not image_mime:
+            image_mime = hinted
+    if picture or attachments:
+        print(
+            "photon photo:",
+            {
+                "attachments": [item.get("id") for item in attachments],
+                "mime": image_mime,
+                "bytes": len(image),
+                "caption": (text or "")[:80],
+            },
+            flush=True,
+        )
+    answer = sms_reply(text, phone, picture or bool(image), image or None, image_mime)
     if space_id.startswith("pho_spc_"):
         sent = send_to_space(space_id, answer, agent_id)
     else:
@@ -256,22 +291,34 @@ def _incoming_message(payload: dict) -> dict:
     return message if isinstance(message, dict) else {}
 
 
-def _read_content(content: dict) -> tuple[str, bool]:
+def _read_content(content: dict) -> tuple[str, bool, list[dict]]:
     """Read a text, a photo, or a text-and-photo group."""
     if not isinstance(content, dict):
-        return "", False
+        return "", False, []
     kind = str(content.get("type") or "")
     if kind == "group":
         texts = []
         picture = False
+        attachments: list[dict] = []
         for part in content.get("parts") or []:
-            text, has_picture = _read_content(part if isinstance(part, dict) else {})
+            text, has_picture, items = _read_content(part if isinstance(part, dict) else {})
             if text:
                 texts.append(text)
             picture = picture or has_picture
-        return " ".join(texts), picture
-    picture = kind == "attachment" or kind in {"image", "media"} or bool(content.get("attachmentId"))
-    return str(content.get("text") or ""), picture
+            attachments.extend(items)
+        return " ".join(texts), picture, attachments
+    attachment_id = str(
+        content.get("attachmentId") or content.get("id") or content.get("attachment_id") or ""
+    ).strip()
+    mime = str(content.get("mimeType") or content.get("mime") or content.get("contentType") or "").strip()
+    picture = (
+        kind == "attachment"
+        or kind in {"image", "media"}
+        or bool(attachment_id)
+        or mime.startswith("image/")
+    )
+    items = [{"id": attachment_id, "mime": mime}] if attachment_id else []
+    return str(content.get("text") or ""), picture, items
 
 
 def _with_update(session: dict) -> dict:
@@ -494,6 +541,13 @@ def return_purchase(body: ReturnRequest, authorization: str | None = Header(defa
     """Mark an order this shopper sent back, so similar products avoid that brand."""
     user = require_user(authorization)
     return mark_returned(body.order_id, user_id=user["id"])
+
+
+@app.post("/purchases/delivery")
+def update_delivery(body: DeliveryDateRequest, authorization: str | None = Header(default=None)):
+    """Change an order's expected arrival date and text the shopper when it moves."""
+    user = require_user(authorization)
+    return set_delivery_date(body.order_id, body.delivery_date, user_id=user["id"])
 
 
 @app.post("/receipts")

@@ -96,16 +96,9 @@ def send_to_space(space_id: str, text: str, sender_id: str = "") -> dict:
     _load_local_env()
     project_id = os.environ.get("PHOTON_PROJECT_ID") or ""
     api_key = os.environ.get("PHOTON_API_KEY", "")
-    agent = (
-        sender_id
-        if str(sender_id).startswith("pho_usr_")
-        else (
-            os.environ.get("PHOTON_IMESSAGE_USER_ID")
-            or os.environ.get("PHOTON_AGENT_USER_ID")
-            or os.environ.get("PHOTON_USER_ID")
-            or ""
-        )
-    )
+    imessage_agent = os.environ.get("PHOTON_IMESSAGE_USER_ID") or ""
+    sms_agent = os.environ.get("PHOTON_AGENT_USER_ID") or os.environ.get("PHOTON_USER_ID") or ""
+    agent = sender_id if str(sender_id).startswith("pho_usr_") else (imessage_agent or sms_agent)
     if not api_key.startswith("pho_") or not project_id.startswith("pho_prj_") or not str(agent).startswith("pho_usr_"):
         return {
             "sent": False,
@@ -113,7 +106,19 @@ def send_to_space(space_id: str, text: str, sender_id: str = "") -> dict:
         }
     if not str(space_id).startswith("pho_spc_"):
         return {"sent": False, "reason": "The incoming text did not include a conversation id."}
-    return _send_message(project_id, api_key, agent, space_id, text)
+    sent = _send_message(project_id, api_key, agent, space_id, text)
+    if sent.get("sent"):
+        return sent
+    reason = str(sent.get("reason") or "").lower()
+    # Shared iMessage spaces reject the SMS agent; retry with the iMessage agent id.
+    if imessage_agent.startswith("pho_usr_") and imessage_agent != agent and (
+        "not sendable" in reason or "shared line" in reason
+    ):
+        retry = _send_message(project_id, api_key, imessage_agent, space_id, text)
+        if retry.get("sent"):
+            return retry
+        return retry
+    return sent
 
 
 def _sms_identity() -> tuple[str, str, str]:
@@ -153,7 +158,7 @@ def _send_message(project_id: str, api_key: str, sender_id: str, space_id: str, 
         {
             "senderId": sender_id,
             "spaceId": space_id,
-            "content": {"type": "text", "format": "plain", "text": message[:1000]},
+            "content": {"type": "text", "format": "plain", "text": message[:1800]},
         },
     )
     if status in {200, 202}:
@@ -176,6 +181,34 @@ def _e164(value: str) -> str:
     if raw.startswith("+") and 10 <= len(digits) <= 15:
         return "+" + digits
     return ""
+
+
+def download_attachment(attachment_id: str) -> tuple[bytes, str]:
+    """Download image bytes for an inbound Photon attachment id."""
+    import time
+
+    _load_local_env()
+    project_id = os.environ.get("PHOTON_PROJECT_ID") or ""
+    api_key = os.environ.get("PHOTON_API_KEY", "")
+    att = str(attachment_id or "").strip()
+    if not att or not project_id.startswith("pho_prj_") or not api_key.startswith("pho_"):
+        return b"", ""
+    # Prefer Photon attachment ids; still try provider GUIDs when that is all the webhook sent.
+    candidates = [att]
+    if not att.startswith("pho_att_") and not att.startswith("pho_"):
+        candidates = [att]
+    path_for = lambda value: f"/v1/projects/{project_id}/attachments/{value}/content"
+    for value in candidates:
+        for attempt in range(3):
+            status, data, mime, detail = _bearer_bytes("GET", path_for(value), api_key)
+            if status == 200 and data and not str(mime or "").startswith("application/json"):
+                return data, mime or "image/jpeg"
+            ready = "not_ready" in (detail or "").lower() or status in {408, 425, 429, 503}
+            if ready and attempt < 2:
+                time.sleep(5)
+                continue
+            break
+    return b"", ""
 
 
 def _bearer(method: str, path: str, api_key: str, body: dict) -> tuple[int, dict, str]:
@@ -206,6 +239,31 @@ def _bearer(method: str, path: str, api_key: str, body: dict) -> tuple[int, dict
     except json.JSONDecodeError:
         return status, {}, ""
     return status, payload if isinstance(payload, dict) else {}, ""
+
+
+def _bearer_bytes(method: str, path: str, api_key: str) -> tuple[int, bytes, str, str]:
+    request = urllib.request.Request(
+        "https://api.photon.codes" + path,
+        data=None,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "*/*",
+            "User-Agent": "UnmaskedShop/1.0",
+            "Idempotency-Key": str(uuid.uuid4()),
+        },
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            raw = response.read()
+            status = response.status
+            mime = str(response.headers.get("Content-Type") or "").split(";")[0].strip()
+    except urllib.error.HTTPError as exc:
+        detail = _error_detail(exc.read())
+        return exc.code, b"", "", detail
+    except (urllib.error.URLError, TimeoutError):
+        return 0, b"", "", ""
+    return status, raw or b"", mime, ""
 
 
 def agent_line() -> dict:

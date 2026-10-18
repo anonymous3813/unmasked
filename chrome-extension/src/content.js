@@ -612,6 +612,12 @@ if (window.UnmaskedOverlay) {
         resolve(chrome.runtime.lastError ? { detail: "Sign-in could not reach the account service." } : response || {});
       });
     });
+  window.UnmaskedOverlay.signOut = () =>
+    new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: "unmasked-logout" }, () => {
+        resolve({ signedOut: !chrome.runtime.lastError });
+      });
+    });
   window.UnmaskedOverlay.onSignedIn = (result) => {
     const update = result && result.update;
     if (update && update.text && window.UnmaskedOverlay.announce) {

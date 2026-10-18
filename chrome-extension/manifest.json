@@ -23,7 +23,12 @@
     }
   ],
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["https://unmasked.fastapicloud.dev/*"],
+  "host_permissions": [
+    "https://unmasked.fastapicloud.dev/*",
+    "https://*.trycloudflare.com/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
   "background": {
     "service_worker": "src/background.js"
   },

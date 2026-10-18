@@ -1,7 +1,8 @@
 """The assistant's phone, cross-store cart, and the orders it remembers."""
 
+import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from backend.app.models.agent import ContactPurpose, FinePrintOrderContext, MessageRole, PastOrder
 from backend.app.services.registry.contact import AgentContact
@@ -10,7 +11,8 @@ ASSISTANT_NAME = "Your Online Assistant"
 ASSISTANT_PHONE = "+1 415 555 0199"
 SHOPPER_ID = "shopper"
 _ORDER_QUESTION = re.compile(
-    r"\b(?:my orders|past orders|what did i (?:buy|order)|orders from|track my)\b",
+    r"\b(?:my orders?|past orders?|what did i (?:buy|order)|orders? from|track my|"
+    r"where(?:'s| is) my|order status|shipping|delivery|purchases?|arriv(?:e|al|es)|when (?:does|will|is))\b",
     re.IGNORECASE,
 )
 _STAGES = (
@@ -19,6 +21,7 @@ _STAGES = (
     (5, "Out for delivery", "On the way to you."),
     (8, "Delivered", "The assistant marks this delivered."),
 )
+_PLACEHOLDER_DAYS = (3, 5, 7)
 
 _contact: AgentContact | None = None
 
@@ -95,6 +98,9 @@ def purchase(items: list[dict], shopper: AgentContact | None = None, user_id: st
             )
             if part
         )
+        delivery_date = _parse_date(item.get("deliveryDate") or item.get("delivery_date"))
+        if delivery_date is None:
+            delivery_date = _placeholder_date(now, len(existing) + offset - 1)
         order = PastOrder(
             order_id=order_id,
             product_name=str(item["name"]),
@@ -104,6 +110,7 @@ def purchase(items: list[dict], shopper: AgentContact | None = None, user_id: st
             price=str(item.get("price") or ""),
             environment_score=int(score) if score is not None and str(score).strip() != "" else None,
             materials=materials,
+            delivery_date=delivery_date,
             fine_print=FinePrintOrderContext(price=str(item.get("price") or ""), checked_at=now),
         )
         shopper.add_order(user_id, order)
@@ -152,24 +159,75 @@ def orders_answer(question: str, shopper: AgentContact | None = None, user_id: s
     return _summary(orders)
 
 
-def _summary(orders: list[PastOrder]) -> str:
-    grouped: dict[str, list[str]] = {}
+def set_delivery_date(
+    order_id: str,
+    delivery_date: datetime | str,
+    shopper: AgentContact | None = None,
+    send=None,
+    user_id: str = SHOPPER_ID,
+) -> dict:
+    """Update one order's arrival date, persist it, and text when the date changes."""
+    shopper = shopper or contact()
+    stamp = _parse_date(delivery_date)
+    if stamp is None:
+        return {"orderId": order_id, "status": "invalid_date"}
+    try:
+        orders = shopper.past_orders(user_id)
+    except KeyError:
+        orders = []
     for order in orders:
+        if order.order_id != order_id:
+            continue
+        order.delivery_date = stamp
+        from backend.app.integrations.supabase_store import save_order
+
+        save_order(order, user_id)
+        refresh_delivery(shopper=shopper, send=send, user_id=user_id)
+        return {"orderId": order_id, **_public(order)}
+    return {"orderId": order_id, "status": "missing"}
+
+
+def ensure_delivery_dates(shopper: AgentContact | None = None, user_id: str = SHOPPER_ID) -> list[PastOrder]:
+    """Fill placeholder delivery dates on orders that do not have one yet."""
+    shopper = shopper or contact()
+    try:
+        orders = shopper.past_orders(user_id)
+    except KeyError:
+        return []
+    from backend.app.integrations.supabase_store import save_order
+
+    for index, order in enumerate(orders):
+        if order.delivery_date is not None:
+            continue
+        if "returned:yes" in (order.materials or "") or order.delivery_status == "Returned":
+            continue
+        order.delivery_date = _placeholder_date(order.ordered_at, index)
+        save_order(order, user_id)
+    return orders
+
+
+def _summary(orders: list[PastOrder]) -> str:
+    lines = ["Your orders", ""]
+    for index, order in enumerate(orders, start=1):
         store = order.store or "Store"
-        price = f" (${order.price})" if order.price else ""
-        grouped.setdefault(store, []).append(f"{order.order_id} {order.product_name}{price}")
-    parts = [f"{store}: {'; '.join(lines)}" for store, lines in grouped.items()]
-    return "Your orders are on this assistant. " + " ".join(parts)
+        price = f"${order.price}" if order.price else "price n/a"
+        arrives = _pretty_date(order.delivery_date) if order.delivery_date else "date n/a"
+        status = order.delivery_status or "saved"
+        lines.append(f"{index}. {order.product_name}")
+        lines.append(f"   {store} · {price}")
+        lines.append(f"   Status: {status}")
+        lines.append(f"   Arrives: {arrives}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def refresh_delivery(now: datetime | None = None, shopper: AgentContact | None = None, send=None, user_id: str = SHOPPER_ID) -> dict:
-    """Advance each order's delivery status and text the shopper when it changes."""
+    """Advance delivery status, keep placeholder dates, and text when status or date changes."""
     now = now or datetime.now(timezone.utc)
     shopper = shopper or contact()
+    ensure_delivery_dates(shopper, user_id)
     if send is None:
-        from backend.app.integrations.photon_line import send_intro
-
-        send = send_intro
+        send = lambda text: _notify(text, user_id)
     from backend.app.services.registry.log import record
 
     try:
@@ -183,10 +241,21 @@ def refresh_delivery(now: datetime | None = None, shopper: AgentContact | None =
         else:
             status, note = _stage(order.ordered_at, now)
         order.delivery_status = status
-        if order.notified_status != status:
-            text = f"{order.product_name} is {status.lower()}. {note}"
+        date_key = _date_key(order.delivery_date)
+        changed_status = order.notified_status != status
+        changed_date = bool(date_key) and order.notified_delivery_date != date_key
+        if changed_status or changed_date:
+            text = _delivery_text(
+                order,
+                status,
+                note,
+                changed_date=changed_date,
+                previous_date=order.notified_delivery_date,
+            )
             result = send(text) or {}
             order.notified_status = status
+            if date_key:
+                order.notified_delivery_date = date_key
             detail = "Delivery text sent." if result.get("sent") else str(result.get("reason") or "Delivery text was not sent.")
             record("intro", f"{order.product_name} · {status}", detail, str(order.product_url))
             from backend.app.integrations.supabase_store import save_order
@@ -204,6 +273,83 @@ def refresh_delivery(now: datetime | None = None, shopper: AgentContact | None =
     scores = [item["environmentScore"] for item in orders if isinstance(item["environmentScore"], int)]
     footprint = round(sum(scores) / len(scores)) if scores else None
     return {"orders": orders, "footprint": footprint}
+
+
+def _notify(text: str, user_id: str) -> dict:
+    """Text the account phone, or the open iMessage space when one is configured."""
+    from backend.app.integrations.photon_line import send_intro, send_to_space
+    from backend.app.services.shop.accounts import user_by_id
+
+    user = user_by_id(user_id) or {}
+    phone = str(user.get("phone") or "")
+    space = os.environ.get("PHOTON_SPACE_ID", "")
+    agent = os.environ.get("PHOTON_IMESSAGE_USER_ID") or ""
+    if space.startswith("pho_spc_"):
+        sent = send_to_space(space, text, agent)
+        if sent.get("sent"):
+            return sent
+    return send_intro(text, phone)
+
+
+def _delivery_text(order: PastOrder, status: str, note: str, changed_date: bool, previous_date: str) -> str:
+    arrives = _pretty_date(order.delivery_date)
+    if changed_date and previous_date:
+        return "\n".join(
+            [
+                "Delivery update",
+                "",
+                order.product_name,
+                f"Now arrives: {arrives}",
+                f"Was: {_pretty_date(previous_date)}",
+                f"Status: {status}",
+            ]
+        )
+    lines = ["Delivery update", "", order.product_name, f"Status: {status}"]
+    if arrives:
+        lines.append(f"Arrives: {arrives}")
+    if note:
+        lines.append(note)
+    return "\n".join(lines)
+
+
+def _placeholder_date(ordered_at: datetime, index: int) -> datetime:
+    stamp = ordered_at if ordered_at.tzinfo else ordered_at.replace(tzinfo=timezone.utc)
+    days = _PLACEHOLDER_DAYS[index % len(_PLACEHOLDER_DAYS)]
+    return (stamp + timedelta(days=days)).replace(hour=17, minute=0, second=0, microsecond=0)
+
+
+def _parse_date(value) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        stamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            stamp = datetime.strptime(text[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp
+
+
+def _date_key(value: datetime | str | None) -> str:
+    stamp = _parse_date(value)
+    if stamp is None:
+        return ""
+    return stamp.date().isoformat()
+
+
+def _pretty_date(value: datetime | str | None) -> str:
+    stamp = _parse_date(value)
+    if stamp is None:
+        return str(value or "")
+    return stamp.strftime("%a %b %d")
 
 
 def _stage(ordered_at: datetime, now: datetime) -> tuple[str, str]:
@@ -225,4 +371,5 @@ def _public(order: PastOrder) -> dict:
         "environmentScore": order.environment_score,
         "materials": order.materials,
         "status": order.delivery_status,
+        "deliveryDate": order.delivery_date.isoformat() if order.delivery_date else "",
     }
