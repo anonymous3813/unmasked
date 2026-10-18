@@ -1,5 +1,7 @@
 """Registry logs and purchases stored in the Supabase Postgres database."""
 
+import hashlib
+import json
 import os
 from datetime import datetime
 from urllib.parse import quote, unquote, urlparse
@@ -105,6 +107,40 @@ def _conn():
         )
         _connection.execute(
             """
+            create table if not exists unmasked_receipts (
+                id text primary key,
+                filename text not null,
+                body text not null default '',
+                items text not null default '[]',
+                saved_at timestamptz not null
+            )
+            """
+        )
+        _connection.execute(
+            """
+            create table if not exists unmasked_users (
+                id text primary key,
+                email text not null unique,
+                name text not null default '',
+                password text not null,
+                created_at timestamptz not null
+            )
+            """
+        )
+        _connection.execute(
+            """
+            create table if not exists unmasked_sessions (
+                digest text primary key,
+                user_id text not null,
+                created_at timestamptz not null
+            )
+            """
+        )
+        _connection.execute("alter table unmasked_users add column if not exists phone text not null default ''")
+        _connection.execute("alter table unmasked_orders add column if not exists user_id text not null default ''")
+        _connection.execute("alter table unmasked_receipts add column if not exists user_id text not null default ''")
+        _connection.execute(
+            """
             create table if not exists unmasked_wishlist (
                 url text primary key,
                 name text not null,
@@ -113,6 +149,21 @@ def _conn():
                 image_url text not null default '',
                 environment_score integer,
                 saved_at timestamptz not null
+            )
+            """
+        )
+        _connection.execute(
+            """
+            create table if not exists unmasked_saved (
+                user_id text not null,
+                url text not null,
+                name text not null,
+                store text not null default '',
+                price text not null default '',
+                image_url text not null default '',
+                environment_score integer,
+                saved_at timestamptz not null,
+                primary key (user_id, url)
             )
             """
         )
@@ -166,7 +217,7 @@ def load_entries() -> list[dict] | None:
     return loaded
 
 
-def save_order(order) -> None:
+def save_order(order, user_id: str = "") -> None:
     connection = _conn()
     if connection is None:
         return
@@ -175,13 +226,14 @@ def save_order(order) -> None:
             """
             insert into unmasked_orders (
                 order_id, product_name, product_url, store, price,
-                environment_score, materials, delivery_status, notified_status, ordered_at
-            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                environment_score, materials, delivery_status, notified_status, ordered_at, user_id
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             on conflict (order_id) do update set
                 delivery_status = excluded.delivery_status,
                 notified_status = excluded.notified_status,
                 environment_score = excluded.environment_score,
-                materials = excluded.materials
+                materials = excluded.materials,
+                user_id = excluded.user_id
             """,
             (
                 order.order_id,
@@ -194,6 +246,7 @@ def save_order(order) -> None:
                 order.delivery_status,
                 order.notified_status,
                 order.ordered_at,
+                user_id,
             ),
         )
     except Exception:
@@ -208,7 +261,7 @@ def load_orders() -> list[dict]:
         rows = connection.execute(
             """
             select order_id, product_name, product_url, store, price, environment_score,
-                   materials, delivery_status, notified_status, ordered_at
+                   materials, delivery_status, notified_status, ordered_at, user_id
             from unmasked_orders order by ordered_at
             """
         ).fetchall()
@@ -228,21 +281,22 @@ def load_orders() -> list[dict]:
                 "delivery_status": row[7] or "Placed",
                 "notified_status": row[8] or "",
                 "ordered_at": row[9],
+                "user_id": row[10] if len(row) > 10 else "",
             }
         )
     return loaded
 
 
-def save_wishlist(item: dict) -> None:
+def save_wishlist(item: dict, user_id: str = "shopper") -> None:
     connection = _conn()
     if connection is None:
         return
     try:
         connection.execute(
             """
-            insert into unmasked_wishlist (url, name, store, price, image_url, environment_score, saved_at)
-            values (%s, %s, %s, %s, %s, %s, %s)
-            on conflict (url) do update set
+            insert into unmasked_saved (user_id, url, name, store, price, image_url, environment_score, saved_at)
+            values (%s, %s, %s, %s, %s, %s, %s, %s)
+            on conflict (user_id, url) do update set
                 name = excluded.name,
                 store = excluded.store,
                 price = excluded.price,
@@ -251,6 +305,7 @@ def save_wishlist(item: dict) -> None:
                 saved_at = excluded.saved_at
             """,
             (
+                user_id,
                 item["url"],
                 item["name"],
                 item.get("store") or "",
@@ -264,7 +319,7 @@ def save_wishlist(item: dict) -> None:
         return
 
 
-def load_wishlist() -> list[dict] | None:
+def load_wishlist(user_id: str = "shopper") -> list[dict] | None:
     connection = _conn()
     if connection is None:
         return None
@@ -272,8 +327,9 @@ def load_wishlist() -> list[dict] | None:
         rows = connection.execute(
             """
             select url, name, store, price, image_url, environment_score, saved_at
-            from unmasked_wishlist order by saved_at desc
-            """
+            from unmasked_saved where user_id = %s order by saved_at desc
+            """,
+            (user_id,),
         ).fetchall()
     except Exception:
         return None
@@ -294,27 +350,160 @@ def load_wishlist() -> list[dict] | None:
     return loaded
 
 
+def save_receipt(record: dict) -> None:
+    """Keep an uploaded bill so similar products still use it after a restart."""
+    connection = _conn()
+    if connection is None:
+        return
+    body = str(record.get("text") or "")
+    filename = str(record.get("filename") or "Receipt")
+    user_id = str(record.get("userId") or "shopper")
+    receipt_id = hashlib.sha256(f"{user_id}|{filename}|{body}".encode()).hexdigest()[:16]
+    try:
+        connection.execute(
+            """
+            insert into unmasked_receipts (id, filename, body, items, saved_at, user_id)
+            values (%s, %s, %s, %s, %s, %s)
+            on conflict (id) do nothing
+            """,
+            (receipt_id, filename, body, json.dumps(record.get("items") or []), datetime.now(), user_id),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+
+
+def load_receipts() -> list[dict]:
+    """Return bills saved for this shopper."""
+    connection = _conn()
+    if connection is None:
+        return []
+    try:
+        rows = connection.execute(
+            "select filename, body, items, user_id from unmasked_receipts order by saved_at desc limit 40"
+        ).fetchall()
+    except Exception:
+        connection.rollback()
+        return []
+    records = []
+    for filename, body, items, user_id in rows:
+        try:
+            parsed = json.loads(items or "[]")
+        except json.JSONDecodeError:
+            parsed = []
+        records.append(
+            {
+                "filename": filename,
+                "text": body,
+                "items": parsed if isinstance(parsed, list) else [],
+                "userId": user_id or "shopper",
+            }
+        )
+    return records
+
+
+def save_user(user: dict) -> None:
+    connection = _conn()
+    if connection is None:
+        return
+    try:
+        connection.execute(
+            """
+            insert into unmasked_users (id, email, name, password, created_at, phone)
+            values (%s, %s, %s, %s, %s, %s)
+            on conflict (id) do update set phone = excluded.phone
+            """,
+            (user["id"], user["email"], user["name"], user["password"], user["createdAt"], user.get("phone") or ""),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+
+
+def save_session(digest: str, user_id: str) -> None:
+    connection = _conn()
+    if connection is None:
+        return
+    try:
+        connection.execute(
+            """
+            insert into unmasked_sessions (digest, user_id, created_at)
+            values (%s, %s, %s)
+            on conflict (digest) do nothing
+            """,
+            (digest, user_id, datetime.now()),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+
+
+def delete_session(digest: str) -> None:
+    connection = _conn()
+    if connection is None:
+        return
+    try:
+        connection.execute("delete from unmasked_sessions where digest = %s", (digest,))
+        connection.commit()
+    except Exception:
+        connection.rollback()
+
+
+def load_accounts() -> tuple[list[dict], list[dict]]:
+    connection = _conn()
+    if connection is None:
+        return [], []
+    try:
+        users = connection.execute("select id, email, name, password, created_at, phone from unmasked_users").fetchall()
+        sessions = connection.execute("select digest, user_id from unmasked_sessions").fetchall()
+    except Exception:
+        connection.rollback()
+        return [], []
+    return (
+        [
+            {
+                "id": row[0],
+                "email": row[1],
+                "name": row[2],
+                "password": row[3],
+                "createdAt": row[4].isoformat() if hasattr(row[4], "isoformat") else str(row[4]),
+                "phone": row[5] if len(row) > 5 else "",
+            }
+            for row in users
+        ],
+        [{"digest": row[0], "user_id": row[1]} for row in sessions],
+    )
+
+
 def hydrate() -> None:
     """Load saved purchases into the assistant profile when the API starts."""
     from backend.app.models.agent import FinePrintOrderContext, PastOrder
+    from backend.app.services.shop.accounts import remember_users
     from backend.app.services.shop.cart import SHOPPER_ID, contact
+    from backend.app.services.shop.receipts import remember_receipts
 
+    remember_users(*load_accounts())
+    remember_receipts(load_receipts())
     rows = load_orders()
     if not rows:
         return
     shopper = contact()
-    try:
-        existing = {order.order_id for order in shopper.past_orders(SHOPPER_ID)}
-    except KeyError:
-        existing = set()
+    seen: set[tuple[str, str]] = set()
     for row in rows:
-        if row["order_id"] in existing:
+        user_id = row.get("user_id") or SHOPPER_ID
+        if (user_id, row["order_id"]) in seen:
             continue
+        seen.add((user_id, row["order_id"]))
+        try:
+            if any(order.order_id == row["order_id"] for order in shopper.past_orders(user_id)):
+                continue
+        except KeyError:
+            shopper.open_profile(user_id, "")
         ordered_at = row["ordered_at"]
         if isinstance(ordered_at, str):
             ordered_at = datetime.fromisoformat(ordered_at)
         shopper.add_order(
-            SHOPPER_ID,
+            user_id,
             PastOrder(
                 order_id=row["order_id"],
                 product_name=row["product_name"],

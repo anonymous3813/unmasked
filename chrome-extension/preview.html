@@ -163,6 +163,25 @@
       ],
       followUps: ["What are the materials?"]
     });
+    UnmaskedOverlay.showFootprint({
+      headline: "A recycled wool jacket typically accounts for about 16–37 kg CO2e.",
+      detail: "Estimated from the material and the product type. This is not a measurement of this exact item.",
+      low: 16,
+      high: 37,
+      material: "recycled wool",
+      kind: "jacket"
+    });
+    UnmaskedOverlay.showTaste({ brands: ["Patagonia"], colors: ["navy"], avoid: [] });
+    UnmaskedOverlay.showCarousel([
+      {
+        name: "Patagonia Recycled Wool Jacket",
+        url: "https://www.patagonia.com/",
+        store: "Patagonia",
+        price: "199.00",
+        imageUrl: "https://images.unsplash.com/photo-1591047139829-d91aecb6caea?auto=format&fit=crop&w=400&q=60",
+        because: "Close to navy, from Patagonia, which you have kept."
+      }
+    ]);
     UnmaskedOverlay.reveal();
     }, 2200);
   </script>

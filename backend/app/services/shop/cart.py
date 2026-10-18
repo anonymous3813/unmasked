@@ -55,22 +55,46 @@ def contact() -> AgentContact:
     return _contact
 
 
-def purchase(items: list[dict], shopper: AgentContact | None = None) -> dict:
+def _order_label(user_id: str, number: int) -> str:
+    """Keep the shared shopper's A0001 ids, and give each account its own."""
+    label = f"A{number:04d}"
+    if user_id == SHOPPER_ID:
+        return label
+    tag = re.sub(r"[^a-zA-Z0-9]", "", user_id)[:8] or "user"
+    return f"{tag}-{label}"
+
+
+def purchase(items: list[dict], shopper: AgentContact | None = None, user_id: str = SHOPPER_ID) -> dict:
     """Record one order per store listing and return what the assistant remembers."""
     shopper = shopper or contact()
-    if shopper is not contact():
-        try:
-            shopper.profile(SHOPPER_ID)
-        except KeyError:
-            shopper.open_profile(SHOPPER_ID, ASSISTANT_PHONE)
+    try:
+        shopper.profile(user_id)
+    except KeyError:
+        shopper.open_profile(user_id, ASSISTANT_PHONE)
     saved = []
     now = datetime.now(timezone.utc)
-    existing = shopper.past_orders(SHOPPER_ID)
+    existing = shopper.past_orders(user_id)
     for offset, item in enumerate(items, start=1):
-        order_id = f"A{len(existing) + offset:04d}"
+        order_id = _order_label(user_id, len(existing) + offset)
         score = item.get("environmentScore")
         if score is None:
             score = item.get("environment_score")
+        from backend.app.services.shop.taste import describe
+
+        facts = describe(str(item["name"]), str(item.get("materials") or ""))
+        brand = str(item.get("brand") or facts["brand"])
+        color = str(item.get("color") or facts["color"])
+        returned = bool(item.get("returned")) or facts["returned"]
+        materials = " ".join(
+            part
+            for part in (
+                str(item.get("materials") or item.get("message") or item.get("quotation") or ""),
+                f"brand:{brand}" if brand else "",
+                f"color:{color}" if color else "",
+                "returned:yes" if returned else "",
+            )
+            if part
+        )
         order = PastOrder(
             order_id=order_id,
             product_name=str(item["name"]),
@@ -79,28 +103,48 @@ def purchase(items: list[dict], shopper: AgentContact | None = None) -> dict:
             store=str(item.get("store") or ""),
             price=str(item.get("price") or ""),
             environment_score=int(score) if score is not None and str(score).strip() != "" else None,
-            materials=str(item.get("materials") or item.get("message") or item.get("quotation") or ""),
+            materials=materials,
             fine_print=FinePrintOrderContext(price=str(item.get("price") or ""), checked_at=now),
         )
-        shopper.add_order(SHOPPER_ID, order)
+        shopper.add_order(user_id, order)
         saved.append(order)
         from backend.app.integrations.supabase_store import save_order
 
-        save_order(order)
-    summary = _summary(shopper.past_orders(SHOPPER_ID))
-    shopper.record_message(SHOPPER_ID, MessageRole.AGENT, summary, ContactPurpose.FINE_PRINT)
+        save_order(order, user_id)
+    summary = _summary(shopper.past_orders(user_id))
+    shopper.record_message(user_id, MessageRole.AGENT, summary, ContactPurpose.FINE_PRINT)
     if shopper is contact():
-        refresh_delivery(now, shopper)
+        refresh_delivery(now, shopper, user_id=user_id)
     return {"answer": summary, "orders": [_public(order) for order in saved]}
 
 
-def orders_answer(question: str, shopper: AgentContact | None = None) -> str | None:
+def mark_returned(order_id: str, shopper: AgentContact | None = None, user_id: str = SHOPPER_ID) -> dict:
+    """Remember that the shopper sent this order back."""
+    shopper = shopper or contact()
+    try:
+        orders = shopper.past_orders(user_id)
+    except KeyError:
+        orders = []
+    for order in orders:
+        if order.order_id != order_id:
+            continue
+        if "returned:yes" not in order.materials:
+            order.materials = f"{order.materials} returned:yes".strip()
+        order.delivery_status = "Returned"
+        from backend.app.integrations.supabase_store import save_order
+
+        save_order(order, user_id)
+        return {"orderId": order_id, "status": "Returned"}
+    return {"orderId": order_id, "status": "missing"}
+
+
+def orders_answer(question: str, shopper: AgentContact | None = None, user_id: str = SHOPPER_ID) -> str | None:
     """Answer an order question from the profile, or leave other questions alone."""
     if _ORDER_QUESTION.search(question or "") is None:
         return None
     shopper = shopper or contact()
     try:
-        orders = shopper.past_orders(SHOPPER_ID)
+        orders = shopper.past_orders(user_id)
     except KeyError:
         orders = []
     if not orders:
@@ -118,7 +162,7 @@ def _summary(orders: list[PastOrder]) -> str:
     return "Your orders are on this assistant. " + " ".join(parts)
 
 
-def refresh_delivery(now: datetime | None = None, shopper: AgentContact | None = None, send=None) -> dict:
+def refresh_delivery(now: datetime | None = None, shopper: AgentContact | None = None, send=None, user_id: str = SHOPPER_ID) -> dict:
     """Advance each order's delivery status and text the shopper when it changes."""
     now = now or datetime.now(timezone.utc)
     shopper = shopper or contact()
@@ -129,23 +173,25 @@ def refresh_delivery(now: datetime | None = None, shopper: AgentContact | None =
     from backend.app.services.registry.log import record
 
     try:
-        saved = shopper.past_orders(SHOPPER_ID)
+        saved = shopper.past_orders(user_id)
     except KeyError:
         saved = []
     orders = []
     for order in saved:
-        status, note = _stage(order.ordered_at, now)
+        if "returned:yes" in (order.materials or ""):
+            status, note = "Returned", "You marked this order returned."
+        else:
+            status, note = _stage(order.ordered_at, now)
         order.delivery_status = status
         if order.notified_status != status:
-            score = f"{order.environment_score} out of 100" if order.environment_score is not None else "not scored"
-            text = f"{order.product_name} is {status.lower()}. {note} Environment score {score}."
+            text = f"{order.product_name} is {status.lower()}. {note}"
             result = send(text) or {}
             order.notified_status = status
             detail = "Delivery text sent." if result.get("sent") else str(result.get("reason") or "Delivery text was not sent.")
             record("intro", f"{order.product_name} · {status}", detail, str(order.product_url))
             from backend.app.integrations.supabase_store import save_order
 
-            save_order(order)
+            save_order(order, user_id)
         orders.append(
             {
                 **_public(order),

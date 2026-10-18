@@ -1,0 +1,9 @@
+.venv/
+backend/.venv/
+.env
+backend/.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.fastapicloud/
+web/node_modules/

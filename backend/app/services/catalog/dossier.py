@@ -12,6 +12,11 @@ _REVIEW = re.compile(
     r"\b(?:out of 5|stars?|verified purchase|customers say|reviewers?)\b",
     re.IGNORECASE,
 )
+_BOILERPLATE = re.compile(
+    r"customer reviews help|help (?:you |customers )?decide whether|was this review helpful|"
+    r"verified purchase program|write a review|no customer reviews|be the first to (?:write|review)",
+    re.IGNORECASE,
+)
 _SPEC = re.compile(
     r"^(material|fabric|weight|dimensions|size|color|colour|made in|capacity|battery|model)\s*[:\-]\s*(.{1,80})$",
     re.IGNORECASE,
@@ -53,21 +58,28 @@ def _policy(notes: list, word: str) -> str:
     return ""
 
 
-def outside_evidence(name: str, search=None) -> dict:
-    """Reviews, policies, and carbon notes from other sites that name this product."""
+def outside_evidence(name: str, search=None, seller: str = "") -> dict:
+    """Reviews and policies from other sites, including Reddit when the page has none."""
     from backend.app.services.catalog.identity import mentions_product, search_label
 
-    found = {"reviews": [], "policies": [], "environment": []}
+    found = {"reviews": [], "policies": [], "environment": [], "coverage": {}}
     product = " ".join(str(name or "").split())[:120]
     label = search_label(product)
     if len(label) < 4:
+        found["coverage"] = _coverage(found)
         return found
     search = search or _default_search
-    queries = (
+    queries = [
+        ("review", f"{product} review rating"),
+        ("review", f"site:reddit.com {product}"),
+        ("review", f"site:reddit.com {label}"),
         ("review", f"{label} review"),
+        ("policy", f"{product} return policy warranty"),
         ("policy", f"{label} return policy warranty"),
-        ("environment", f"{label} carbon footprint materials CO2e"),
-    )
+    ]
+    seller_name = " ".join(str(seller or "").split())[:80]
+    if seller_name and seller_name.lower() not in label.lower():
+        queries.insert(1, ("review", f"site:reddit.com {seller_name}"))
     hits = []
     for kind, query in queries:
         try:
@@ -83,19 +95,62 @@ def outside_evidence(name: str, search=None) -> dict:
         url = str(hit.get("url") or "").strip()
         content = " ".join(str(hit.get("content") or "").split())
         blob = f"{title} {content}"
-        if not url or url in seen or not (mentions_product(label, blob) or mentions_product(product, blob)):
+        if not url or url in seen or not _about_this(label, product, blob):
             continue
         seen.add(url)
         source = _clip(title, 80) or _title_from_url(url)
-        if kind == "review" and len(found["reviews"]) < 4 and (_REVIEW.search(blob) or "review" in blob.lower()):
-            found["reviews"].append({"quote": _clip(content or title, 280), "source": source, "url": url})
+        reddit = "reddit.com" in url.lower()
+        if _is_boilerplate(content or title):
+            continue
+        if kind == "review" and len(found["reviews"]) < 4 and (reddit or _REVIEW.search(blob) or "review" in blob.lower()):
+            image = str(hit.get("image") or "").strip()
+            found["reviews"].append(
+                {
+                    "quote": _clip(content or title, 280),
+                    "source": source,
+                    "url": url,
+                    "image": image if image.startswith("http") else "",
+                }
+            )
         elif kind == "policy" and len(found["policies"]) < 3 and re.search(r"return|refund|warrant", blob, re.I):
             found["policies"].append({"title": source, "text": _clip(content or title, 280), "url": url})
-        elif kind == "environment" and len(found["environment"]) < 3 and re.search(
-            r"carbon|co2|recycl|polyester|plastic|wool|organic|emission|footprint", blob, re.I
-        ):
-            found["environment"].append({"text": _clip(content or title, 280), "source": source, "url": url})
+    found["coverage"] = _coverage(found)
     return found
+
+
+def _is_boilerplate(text: str) -> bool:
+    return bool(_BOILERPLATE.search(text or ""))
+
+
+def _coverage(found: dict) -> dict:
+    reviews = found.get("reviews") or []
+    policies = found.get("policies") or []
+    if reviews:
+        review_line = f"Retrieved {len(reviews)} review excerpts from other sites."
+    else:
+        review_line = (
+            "No customer review excerpt was retrieved from other sites. "
+            "The search covered the product name, the category, and Reddit. "
+            "Retailer help text is not treated as a review."
+        )
+    if policies:
+        policy_line = f"Retrieved {len(policies)} return or warranty passages from other sites."
+    else:
+        policy_line = "No return or warranty passage was retrieved from this page or from other sites."
+    return {"reviews": review_line, "policies": policy_line}
+
+
+def _about_this(label: str, product: str, blob: str) -> bool:
+    """A hit counts when it names this product, or at least this kind of product."""
+    from backend.app.services.catalog.identity import known_kind, mentions_product
+
+    if mentions_product(label, blob) or mentions_product(product, blob):
+        return True
+
+    kind = known_kind(label) or known_kind(product)
+    parts = [part for part in (kind or "").replace("television", "tv").split() if len(part) > 2]
+    haystack = blob.lower()
+    return bool(parts) and all(part in haystack for part in parts)
 
 
 def _mentions(name: str, text: str) -> bool:
@@ -110,7 +165,7 @@ def _mentions(name: str, text: str) -> bool:
 def _default_search(query: str) -> list[dict]:
     from backend.app.integrations.tavily_client import TavilyClient
 
-    return TavilyClient().search(query, max_results=4)
+    return TavilyClient().search(query, max_results=6, include_images=True)
 
 
 def empty_dossier(name: str = "") -> dict:
@@ -164,7 +219,7 @@ def _reviews(page_text: str, record: dict) -> list[dict]:
         if not isinstance(item, dict):
             continue
         quote = _clip(str(item.get("quote") or ""), 280)
-        if not quote or quote.lower() in seen:
+        if not quote or quote.lower() in seen or _is_boilerplate(quote):
             continue
         seen.add(quote.lower())
         rows.append(
@@ -176,7 +231,7 @@ def _reviews(page_text: str, record: dict) -> list[dict]:
         )
     for sentence in _SENTENCE.split(page_text or ""):
         clean = " ".join(sentence.split())
-        if len(clean) < 40 or len(clean) > 280 or not _REVIEW.search(clean):
+        if len(clean) < 40 or len(clean) > 280 or not _REVIEW.search(clean) or _is_boilerplate(clean):
             continue
         if clean.lower() in seen:
             continue

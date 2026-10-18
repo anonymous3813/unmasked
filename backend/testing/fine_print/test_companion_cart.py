@@ -9,12 +9,125 @@ from backend.app.services.shop.products import find_products, requested_item
 from backend.app.services.shop.cart import ASSISTANT_PHONE, orders_answer, purchase, refresh_delivery
 
 
+def test_eco_chairs_for_a_canopy_search_folding_chairs():
+    from backend.app.services.shop.products import paired_item
+
+    kind, prefix = paired_item(
+        "find chairs that are environmentally friendly and go with this",
+        "Costway 10 x 10 beige event outdoor canopy",
+    )
+
+    assert kind == "folding chair"
+    assert prefix == "eco friendly"
+    assert paired_item("Can I return these?", "Costway canopy") is None
+    assert paired_item("Is this environmentally friendly?", "Costway canopy") is None
+
+
 def test_only_a_find_request_names_a_product():
     assert requested_item("find a mattress that works with this") == "mattress"
     assert requested_item("what mattress goes with this") == "mattress"
     assert requested_item("what goes with this", "Queen Platform Bed Frame") == "mattress"
     assert requested_item("show me pillows that fit this bed") == "pillows"
     assert requested_item("Can I return these?") is None
+
+
+def test_a_shorter_title_is_still_another_product():
+    from backend.app.services.shop.marks import _same_listing, offer_alternatives
+
+    assert (
+        _same_listing(
+            "Costway 10 x 10 beige event outdoor canopy",
+            "https://www.walmart.com/ip/costway/1",
+            "Event Outdoor Canopy",
+            "https://www.amazon.com/dp/B000CANOPY1",
+        )
+        is False
+    )
+
+
+def test_compare_keeps_a_listing_whose_title_overlaps_the_page(monkeypatch):
+    from backend.app.services.shop.marks import offer_alternatives
+
+    monkeypatch.setattr("backend.app.services.shop.marks._tavily_ready", lambda: True)
+    monkeypatch.setattr(
+        "backend.app.services.shop.taste.load_taste",
+        lambda user_id="shopper": {"brands": [], "colors": [], "avoid": []},
+    )
+    monkeypatch.setattr("backend.app.services.shop.marks.TavilyClient", lambda: type("Search", (), {"search": lambda *args, **kwargs: []})())
+
+    def listings(*args, **kwargs):
+        return [
+            {
+                "name": "Event Outdoor Canopy",
+                "store": "Amazon",
+                "price": "79.99",
+                "url": "https://www.amazon.com/dp/B000CANOPY1",
+                "imageUrl": "https://images.example/canopy.jpg",
+                "message": "Polyester canopy.",
+            }
+        ]
+
+    monkeypatch.setattr("backend.app.services.shop.marks.find_products", listings)
+    found = offer_alternatives(
+        "Costway 10 x 10 beige event outdoor canopy",
+        "https://www.walmart.com/ip/costway/1",
+        "Polyester fabric canopy.",
+    )
+
+    assert found["products"]
+    assert found["products"][0]["name"] == "Event Outdoor Canopy"
+    assert found["products"][0]["price"] == "79.99"
+    assert found["products"][0]["reviewNote"]
+    assert found["products"][0]["footprintLow"] and found["products"][0]["footprintHigh"]
+
+
+def test_a_broad_search_still_returns_another_store():
+    from backend.app.services.shop.products import loose_products
+
+    def search(query):
+        return [
+            {
+                "title": "Eurmax Pop Up Canopy | Amazon.com",
+                "url": "https://www.amazon.com/dp/B000CANOPY9",
+                "content": "Eurmax pop up canopy $88.00",
+                "image": "https://images.example/eurmax.jpg",
+            }
+        ]
+
+    cards = loose_products("canopy", "https://www.walmart.com/ip/costway/1", search)
+
+    assert cards[0]["store"] == "Amazon"
+    assert cards[0]["name"].startswith("Eurmax")
+    assert cards[0]["price"] == "88.00"
+
+
+def test_a_similar_product_is_shown_only_after_a_photo_is_found():
+    from backend.app.services.shop.marks import _with_images
+
+    products = [
+        {
+            "name": "Leather Hamilton Satchel",
+            "store": "Walmart",
+            "url": "https://www.walmart.com/ip/satchel/9",
+            "imageUrl": "",
+        },
+        {
+            "name": "Plain Tote",
+            "store": "Target",
+            "url": "https://www.target.com/p/tote/2",
+            "imageUrl": "",
+        },
+    ]
+
+    def search(query: str) -> list[dict]:
+        if "Satchel" in query:
+            return [{"image": "https://images.example/satchel.jpg", "title": "Leather Hamilton Satchel"}]
+        return []
+
+    shown = _with_images(products, search)
+
+    assert [item["name"] for item in shown] == ["Leather Hamilton Satchel"]
+    assert shown[0]["imageUrl"] == "https://images.example/satchel.jpg"
 
 
 def test_listings_keep_one_priced_product_from_each_store():
@@ -53,11 +166,12 @@ def test_listings_keep_one_priced_product_from_each_store():
         search,
     )
 
-    assert [card["store"] for card in cards] == ["Walmart", "Amazon"]
+    assert [card["store"] for card in cards] == ["Walmart", "Amazon", "Home Depot"]
     assert cards[0]["price"] == "129.79"
     assert cards[0]["imageUrl"].endswith("selene-queen.jpg")
     assert cards[1]["price"] == "149.00"
-    assert all(card["imageUrl"].startswith("http") for card in cards)
+    assert cards[2]["imageUrl"] == ""
+    assert all(not card["imageUrl"] or card["imageUrl"].startswith("http") for card in cards)
 
 
 def test_a_lawn_mower_search_keeps_lawn_mowers():
@@ -120,7 +234,65 @@ def test_outside_evidence_comes_from_other_sites():
     found = outside_evidence("Honda Lawn Mower", search)
 
     assert found["reviews"][0]["url"].startswith("https://www.nytimes.com/")
-    assert "42 kg" in found["environment"][0]["text"]
+    assert found["environment"] == []
+
+
+def test_retailer_help_text_is_not_kept_as_a_review():
+    from backend.app.services.catalog.dossier import outside_evidence
+
+    def search(query: str) -> list[dict]:
+        if "review" in query and "reddit.com" not in query:
+            return [
+                {
+                    "title": "Customer reviews",
+                    "url": "https://www.walmart.com/reviews/product/1",
+                    "content": "Customer reviews help customers decide whether this Costway canopy is right for them.",
+                }
+            ]
+        return []
+
+    found = outside_evidence("Costway Canopy", search)
+
+    assert found["reviews"] == []
+    assert "Retailer help text" in found["coverage"]["reviews"]
+
+
+def test_a_reddit_thread_counts_as_a_review_when_it_names_the_product():
+    from backend.app.services.catalog.dossier import outside_evidence
+
+    def search(query: str) -> list[dict]:
+        if "reddit.com" in query:
+            return [
+                {
+                    "title": "Honda lawn mower",
+                    "url": "https://www.reddit.com/r/lawncare/comments/honda",
+                    "content": "The Honda lawn mower has lasted three seasons.",
+                }
+            ]
+        return []
+
+    found = outside_evidence("Honda Lawn Mower", search)
+
+    assert found["reviews"][0]["url"].startswith("https://www.reddit.com/")
+
+
+def test_a_review_of_this_kind_of_product_is_kept():
+    from backend.app.services.catalog.dossier import outside_evidence
+
+    def search(query: str) -> list[dict]:
+        if "review" in query and "reddit.com" not in query:
+            return [
+                {
+                    "title": "Best lawn mowers",
+                    "url": "https://www.nytimes.com/wirecutter/reviews/lawn-mowers",
+                    "content": "This lawn mower stays quieter than the other gas models. 4 out of 5 stars.",
+                }
+            ]
+        return []
+
+    found = outside_evidence("Honda Lawn Mower", search)
+
+    assert found["reviews"][0]["url"].endswith("/lawn-mowers")
 
 
 def test_a_long_model_title_still_searches_the_brand_and_kind():
@@ -150,16 +322,58 @@ def test_a_long_model_title_still_searches_the_brand_and_kind():
 
     found = outside_evidence("Honda HRX217VKA 21 in. Lawn Mower, Smart Drive", search)
 
-    assert any("Honda" in query and "lawn mower" in query and "carbon" in query for query in queries)
-    assert len(found["environment"]) == 1
-    assert "42 kg" in found["environment"][0]["text"]
-    assert "173" not in found["environment"][0]["text"]
+    assert any("Honda" in query and "lawn mower" in query for query in queries)
+    assert not any("carbon" in query for query in queries)
+    assert found["environment"] == []
+
+
+def test_a_screen_reader_blurb_is_not_the_handbag():
+    from backend.app.services.catalog.footprint import estimate_footprint
+    from backend.app.services.catalog.identity import identify_product, known_kind
+
+    assert known_kind("Michael Kors Women's Hamilton Satchel") == "satchel"
+    picked = identify_product(
+        "Product summary presents key product information Keyboard shortcut shift + opt + D",
+        "Amazon.com: Michael Kors Women's Hamilton Satchel",
+        ["Michael Kors Women's Hamilton Satchel"],
+        "Color: Silver-tone Hardware, Urbino Leather. Price $208.60",
+    )
+
+    assert picked["name"] == "Michael Kors Women's Hamilton Satchel"
+    assert picked["kind"] == "satchel"
+    estimate = estimate_footprint(picked["name"], "Urbino Leather satchel")
+    assert estimate["material"] == "leather"
+    assert estimate["low"] == 12
+    assert estimate["high"] == 35
+
+
+def test_the_visible_heading_wins_over_the_first_structured_product():
+    from backend.app.services.catalog.identity import identify_product
+
+    picked = identify_product(
+        "Dell UltraSharp 27 Monitor",
+        "Amazon.com",
+        ["Logitech Wireless Mouse", "Dell UltraSharp 27 Monitor"],
+        "A 27 inch computer monitor.",
+    )
+
+    assert picked["name"] == "Dell UltraSharp 27 Monitor"
+    assert picked["kind"] == "monitor"
 
 
 def test_a_laptop_page_does_not_keep_keyboards():
     from backend.app.services.shop.products import _matches
     from backend.app.services.catalog.identity import accept_kind, known_kind
 
+    from backend.app.services.shop.products import _same_kind
+    from backend.app.services.catalog.identity import same_product
+
+    assert known_kind("Omron Blood Pressure Monitor") == "blood pressure monitor"
+    assert known_kind("Dell 27 inch Monitor") == "monitor"
+    assert same_product("monitor", "blood pressure monitor") is False
+    assert _same_kind("monitor", "Omron Blood Pressure Monitor") is False
+    assert _same_kind("monitor", "Dell 27 inch Monitor") is True
+    assert _same_kind("monitor", "Dell 27 inch Display") is True
     assert known_kind("Dell XPS Laptop with backlit keyboard") == "laptop"
     assert known_kind("Keychron Wireless Keyboard") == "keyboard"
     assert _matches("board", "mechanical keyboard") is False
@@ -193,6 +407,10 @@ def test_a_laptop_page_does_not_keep_keyboards():
     )
 
     assert [card["name"] for card in cards] == ["Lenovo IdeaPad Laptop"]
+
+    from backend.app.services.shop.products import _product_page
+
+    assert _product_page("https://www.bestbuy.com/site/sony-headphones/6505727.p") is True
 
 
 def test_the_agent_names_a_kind_the_title_does_not_spell():
@@ -295,14 +513,43 @@ def test_delivery_status_advances_and_texts_once_per_change():
     assert "Aqua Loop is placed." in sent[0]
 
 
+def test_a_welcome_text_opens_an_sms_conversation(monkeypatch):
+    from backend.app.integrations.photon_line import send_intro
+
+    monkeypatch.setenv("PHOTON_API_KEY", "pho_sk_test")
+    monkeypatch.setenv("PHOTON_PROJECT_ID", "pho_prj_testproject000000000000")
+    monkeypatch.setenv("PHOTON_USER_ID", "pho_usr_agent000000000000000001")
+    monkeypatch.setenv("PHOTON_SPACE_ID", "")
+    calls = []
+
+    def fake(method, path, key, body):
+        calls.append((path, body))
+        if path.endswith("/users"):
+            return 200, {"id": "pho_usr_shopper00000000000001"}, ""
+        if path.endswith("/spaces"):
+            return 200, {"id": "pho_spc_welcome0000000000001"}, ""
+        return 202, {}, ""
+
+    monkeypatch.setattr("backend.app.integrations.photon_line._bearer", fake)
+    result = send_intro("Welcome to Unmasked.", "2065550100")
+
+    assert result["sent"] is True
+    assert calls[0][1]["handle"] == "+12065550100"
+    assert calls[1][1]["participantIds"][0] == "pho_usr_agent000000000000000001"
+    assert calls[2][1]["content"]["text"] == "Welcome to Unmasked."
+
+
 def test_first_text_waits_for_a_photon_2_space(monkeypatch):
     monkeypatch.setenv("PHOTON_API_KEY", "")
+    monkeypatch.delenv("PHOTON_AGENT_IMESSAGE_NUMBER", raising=False)
+    monkeypatch.delenv("PHOTON_IMESSAGE_USER_ID", raising=False)
+    monkeypatch.setattr("backend.app.integrations.photon_line._load_local_env", lambda: None)
     from backend.app.integrations.photon_line import send_intro
 
     result = send_intro("Alpine Jacket states no return limit. Environmental friendliness is 50 out of 100.")
 
     assert result["sent"] is False
-    assert "Photon 2.0" in result["reason"]
+    assert "Photon SMS" in result["reason"]
 
 
 def test_inbox_message_and_call_use_the_cart_and_orders():

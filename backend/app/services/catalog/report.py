@@ -51,7 +51,7 @@ def build_report(
     products: list | None = None,
     page_text: str = "",
 ) -> dict:
-    """Return a validated report. Carbon figures are copied from product-specific sources."""
+    """Return a validated report. The footprint is estimated from the material and product type."""
     dossier = dossier or {}
     outside = outside or {}
     product = " ".join(str(name or dossier.get("name") or "").split())
@@ -94,39 +94,19 @@ def build_report(
         if source_id:
             findings.append(Finding(label="Material", value=page_material, status="manufacturer_claim", sourceIds=[source_id]))
 
-    verified_figure = ""
-    for row in (outside.get("environment") or [])[:3]:
-        text = " ".join(str(row.get("text") or "").split())
-        source_url = str(row.get("url") or "")
-        specific = _specific(product, text)
-        figure = _figure(text) if specific else ""
-        source_class = "background"
-        if specific and figure and not _same_site(page_url, source_url):
-            source_class = "independent_product"
-        elif specific and _same_site(page_url, source_url):
-            source_class = "manufacturer"
-        elif specific:
-            source_class = "independent_product"
-        source_id = add_source(str(row.get("source") or "Outside source"), source_url, text, source_class, specific)
-        if source_id and figure and source_class == "independent_product" and not verified_figure and len(findings) < 3:
-            verified_figure = figure
-            findings.insert(0, Finding(label="Carbon footprint", value=figure, status="verified", sourceIds=[source_id]))
-        elif source_id and specific and len(findings) < 3:
-            material = _material(text)
-            if material and all(material.lower() not in finding.value.lower() for finding in findings):
-                findings.append(
-                    Finding(label="Material", value=material, status="verified", sourceIds=[source_id])
-                )
-        certification = _certification(text) if specific else ""
-        if source_id and certification and len(findings) < 3:
-            findings.append(
-                Finding(
-                    label="Certification",
-                    value=certification,
-                    status="manufacturer_claim" if source_class == "manufacturer" else "verified",
-                    sourceIds=[source_id],
-                )
-            )
+    from backend.app.services.catalog.footprint import estimate_footprint
+
+    footprint = estimate_footprint(product, page_text, dossier.get("specs") or [])
+    if footprint.get("estimated") and len(findings) < 3:
+        findings.insert(
+            0,
+            Finding(
+                label="Carbon footprint",
+                value=str(footprint.get("productHeadline") or footprint["headline"])[:180],
+                status="insufficient_evidence",
+                sourceIds=[],
+            ),
+        )
 
     for review in (outside.get("reviews") or [])[:2]:
         quote = " ".join(str(review.get("quote") or "").split())
@@ -140,31 +120,19 @@ def build_report(
 
     pictured = _pictured(products or [], notes or [])
     materials = [finding for finding in findings if finding.label == "Material"]
-    if verified_figure:
-        verdict = f"An outside source states a carbon footprint of {verified_figure}."
-        why = "That figure is copied from the source that measured this product."
-        status = "verified"
-    elif materials:
-        verdict = "Material information is available, but product-level emissions are unverified."
-        why = "Material information alone is insufficient to calculate a defensible footprint."
-        status = "insufficient_evidence"
-    else:
-        verdict = "Carbon footprint not verified."
-        why = "No verified product-specific CO2e measurement was found."
-        status = "insufficient_evidence"
+    verdict = footprint["headline"]
+    why = footprint["detail"]
+    status = "insufficient_evidence"
 
     blocks: list[Block] = [
         SummaryCard(verdict=verdict, why=why),
         SustainabilityReport(title="Environmental analysis", status=status, findings=findings[:3]),
     ]
-    if not verified_figure:
+    if not footprint.get("estimated"):
         blocks.append(
             MissingEvidence(
                 metric="product_carbon_footprint",
-                reason=(
-                    "Carbon footprint not verified. No verified product-specific CO2e measurement was found. "
-                    "Material information alone is insufficient to calculate a defensible footprint."
-                ),
+                reason=str(footprint.get("coverage") or "Product carbon footprint not independently verified."),
             )
         )
     if sources:
@@ -197,7 +165,9 @@ def build_report(
         suggestedActions=actions,
         followUps=follow_ups[:3],
     )
-    return report.model_dump(by_alias=True, mode="json")
+    payload = report.model_dump(by_alias=True, mode="json")
+    payload["footprint"] = footprint
+    return payload
 
 
 def look_at_page(report: dict, page_text: str = "", complete=None) -> dict:
@@ -210,7 +180,7 @@ def look_at_page(report: dict, page_text: str = "", complete=None) -> dict:
         "Write the verdict from that page and the retrieved report. "
         "Use only facts that appear in the page or the report. "
         "Do not invent a carbon number, a price, a score, or a certification. "
-        "If the report says the carbon footprint is not verified, keep that. "
+        "If the report gives an estimated range, keep that range. "
         'Return JSON: {"verdict": "one sentence the shopper should know", "why": "one sentence on why it matters"}\n\n'
         f"Page text:\n{text[:6000]}\n\n"
         f"Report summary:\n{report.get('summary') or ''}\n"
@@ -224,6 +194,12 @@ def look_at_page(report: dict, page_text: str = "", complete=None) -> dict:
     why = " ".join(str(payload.get("why") or "").split())
     if not verdict or _invented_figure(f"{verdict} {why}", text, report):
         return report
+    original = str(report.get("summary") or "")
+    span = re.search(r"typically about \d+\s*[–-]\s*\d+\s*kg CO2e", original, re.IGNORECASE)
+    if span and span.group(0).lower() not in verdict.lower():
+        if re.search(r"not clear enough|not estimated|did not name a material", verdict, re.IGNORECASE):
+            return report
+        verdict = f"{verdict.rstrip('.')} {span.group(0)}."
     blocks = []
     for block in report.get("blocks") or []:
         if isinstance(block, dict) and block.get("type") == "summary_card":
@@ -274,6 +250,7 @@ def clean_report(payload: dict) -> dict:
         except ValidationError:
             continue
     follow_ups = [str(item) for item in (raw.get("followUps") or []) if str(item).strip()][:3]
+    footprint = raw.get("footprint") if isinstance(raw.get("footprint"), dict) else None
     report = ShoppingReport(
         responseId=str(raw.get("responseId") or "empty"),
         summary=str(raw.get("summary") or ""),
@@ -283,7 +260,10 @@ def clean_report(payload: dict) -> dict:
         suggestedActions=actions,
         followUps=follow_ups,
     )
-    return report.model_dump(by_alias=True, mode="json")
+    payload = report.model_dump(by_alias=True, mode="json")
+    if footprint:
+        payload["footprint"] = footprint
+    return payload
 
 
 def _json_object(raw: str) -> dict:

@@ -59,7 +59,7 @@ class TavilyClient:
             raise RuntimeError(f"Tavily request failed with status {exc.code}") from exc
         results = [result for result in (payload.get("results") or []) if isinstance(result, dict)]
         images = payload.get("images") or []
-        if wants_images and len(images) == len(results):
+        if wants_images and images:
             for result, image in zip(results, images):
                 url = image if isinstance(image, str) else (image or {}).get("url")
                 if url and not result.get("image"):

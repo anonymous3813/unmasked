@@ -33,17 +33,23 @@
     call: null,
     evidenceOpen: {},
     suggestions: SUGGESTIONS.slice(),
+    account: null,
+    authMode: "login",
+    authError: "",
     reading: false,
+    seeking: false,
     readingStep: 0,
+    registry: null,
     readingSteps: [
       "Reading the product on this page",
       "Checking other sites for reviews and policies",
+      "Checking the public registry",
       "Matching the same kind of product",
     ],
   };
   let readingTimer = null;
   let revealTimer = null;
-  let readingStarted = 0;
+  let pending = { notes: false, products: false };
 
   function threadKey() {
     return "unmaskedThread:" + location.href;
@@ -73,13 +79,16 @@
 
   function beginReading() {
     if (revealTimer) clearTimeout(revealTimer);
-    readingStarted = Date.now();
+    pending = { notes: true, products: true };
     state.reading = true;
     state.readingStep = 0;
     state.summary = null;
     state.overview = [];
     state.outside = null;
     state.report = null;
+    state.footprint = null;
+    state.taste = null;
+    state.registry = null;
     state.products = [];
     state.pageProduct = null;
     state.messages = [];
@@ -96,15 +105,18 @@
   }
 
   function reveal() {
-    const wait = Math.max(0, 1700 - (Date.now() - readingStarted));
-    if (revealTimer) clearTimeout(revealTimer);
-    revealTimer = setTimeout(() => {
-      state.reading = false;
-      if (readingTimer) clearInterval(readingTimer);
-      readingTimer = null;
-      loadThread();
-      render();
-    }, wait);
+    pending.notes = false;
+    finishReading();
+  }
+
+  function finishReading() {
+    if (pending.notes || pending.products) return;
+    state.reading = false;
+    state.seeking = false;
+    if (readingTimer) clearInterval(readingTimer);
+    readingTimer = null;
+    loadThread();
+    render();
   }
 
   function mountChat() {
@@ -149,6 +161,41 @@
     },
     send(text) {
       sendQuestion(text);
+    },
+    toggleAuthMode() {
+      state.authMode = state.authMode === "register" ? "login" : "register";
+      state.authError = "";
+      render();
+    },
+    signIn(form) {
+      const sign = window.UnmaskedOverlay && window.UnmaskedOverlay.signIn;
+      state.authError = "";
+      state.activity = "Signing in…";
+      render();
+      if (typeof sign !== "function") {
+        state.activity = "";
+        state.authError = "Sign-in is available from the extension.";
+        render();
+        return;
+      }
+      Promise.resolve(sign(form))
+        .then((result) => {
+          state.activity = "";
+          if (!result || !result.token) {
+            state.authError = (result && (result.detail || result.reason)) || "That email or password is not right.";
+            render();
+            return;
+          }
+          state.account = result.account;
+          state.authError = "";
+          render();
+          if (typeof window.UnmaskedOverlay.onSignedIn === "function") window.UnmaskedOverlay.onSignedIn(result);
+        })
+        .catch(() => {
+          state.activity = "";
+          state.authError = "Sign-in could not reach the account service.";
+          render();
+        });
     },
     wishlist(product) {
       saveWishlist(product);
@@ -453,6 +500,7 @@
       const payload = reply && typeof reply === "object" ? reply : { answer: reply };
       state.activity = "";
       if (Array.isArray(payload.products) && payload.products.length) state.products = payload.products;
+      if (Array.isArray(payload.registry)) state.registry = payload.registry;
       const accepted = window.UnmaskedChat && window.UnmaskedChat.acceptReport ? window.UnmaskedChat.acceptReport(payload.report) : null;
       if (accepted) {
         state.report = accepted;
@@ -552,6 +600,40 @@
     return summary;
   }
 
+  function showAccount(account) {
+    state.account = account && account.email ? account : null;
+    state.authError = "";
+    if (state.account) state.open = true;
+    mountChat();
+    render();
+  }
+
+  function showSignedOut() {
+    state.account = null;
+    state.reading = false;
+    state.open = true;
+    mountChat();
+    render();
+  }
+
+  function showFootprint(footprint) {
+    state.footprint = footprint || null;
+    mountChat();
+    render();
+  }
+
+  function showTaste(taste) {
+    state.taste = taste || null;
+    mountChat();
+    render();
+  }
+
+  function showRegistry(entries) {
+    state.registry = Array.isArray(entries) ? entries : [];
+    mountChat();
+    render();
+  }
+
   function showReport(report) {
     const accepted = window.UnmaskedChat && window.UnmaskedChat.acceptReport ? window.UnmaskedChat.acceptReport(report) : null;
     if (!accepted) return;
@@ -620,11 +702,29 @@
     render();
   }
 
-  function showCarousel(products) {
-    state.products = (Array.isArray(products) ? products : []).filter((product) => product && /^https?:/i.test(String(product.imageUrl || "")));
+  function beginCompare() {
+    state.seeking = true;
     mountChat();
-    if (state.products.length) state.open = true;
     render();
+  }
+
+  function showCarousel(products, note) {
+    pending.products = false;
+    state.seeking = false;
+    const seen = new Set();
+    state.products = (Array.isArray(products) ? products : [])
+      .filter((product) => product && product.name && /^https?:/i.test(String(product.url || "")))
+      .filter((product) => {
+        const url = String(product.url || "");
+        if (!url || seen.has(url)) return false;
+        seen.add(url);
+        return true;
+      })
+      .slice(0, 8);
+    state.compareNote = note || (state.products.length ? "These listings came back from other stores." : "No other-store listing was retrieved for this kind of product.");
+    mountChat();
+    state.open = true;
+    finishReading();
   }
 
   function showCart(items) {
@@ -705,7 +805,13 @@
     showDossier,
     showOutside,
     showReport,
+    showFootprint,
+    showRegistry,
+    showAccount,
+    showSignedOut,
+    showTaste,
     showTextStatus,
+    beginCompare,
     showCarousel,
     announce(text) {
       mountChat();
