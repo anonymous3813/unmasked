@@ -14,6 +14,9 @@
   let marks = [];
   let frame = 0;
   let currentNotes = [];
+  let currentVisits = [];
+  let chatPanel = null;
+  let chatOrb = null;
 
   function show(notes) {
     currentNotes = Array.isArray(notes) ? notes : [];
@@ -72,25 +75,30 @@
 
   function findAnchor(note) {
     if (note.kind === "price") {
-      return findPrice(readPrices(note).listed) || decisionPoint();
+      return visible(findPrice(readPrices(note).listed)) || visible(findProminentPrice()) || decisionPoint();
     }
     if (note.kind === "recommendation") return findProblem(note);
     const words = KEYWORDS[(note.title || "").toLowerCase()] || [];
-    return findPhrase(words) || findPrice(readPrices(note).listed) || decisionPoint();
+    return visible(findPhrase(words)) || visible(findPrice(readPrices(note).listed)) || decisionPoint();
   }
 
   function findProblem(note) {
     const aspect = String(note.aspect || "cost_value").toLowerCase();
     if (aspect === "environmental") {
       return (
-        findPhrase(["recycled", "sustainable", "organic", "environment", "material"]) ||
-        findProminentPrice()
+        visible(findPhrase(["recycled", "sustainable", "organic", "environment", "material"])) ||
+        visible(findProminentPrice()) ||
+        decisionPoint()
       );
     }
     if (aspect === "durability") {
-      return findPhrase(["waterproof", "lifetime", "guaranteed", "warranty", "durable"]) || findProminentPrice();
+      return (
+        visible(findPhrase(["waterproof", "lifetime", "guaranteed", "warranty", "durable"])) ||
+        visible(findProminentPrice()) ||
+        decisionPoint()
+      );
     }
-    return findProminentPrice();
+    return visible(findProminentPrice()) || decisionPoint();
   }
 
   function findProminentPrice() {
@@ -123,10 +131,11 @@
     while (node) {
       const text = node.nodeValue || "";
       const parent = node.parentElement;
-      if (pattern.test(text) && parent && usable(parent)) {
+      if (text.match(pattern) && parent && usable(parent)) {
         const size = parseFloat(getComputedStyle(parent).fontSize) || 0;
         const length = parent.innerText.trim().length;
-        const score = size * 1000 - length;
+        const onScreen = inViewport(parent) ? 1000000 : 0;
+        const score = onScreen + size * 1000 - length;
         if (!best || score > best.score) best = { element: parent, score };
       }
       node = walker.nextNode();
@@ -141,17 +150,34 @@
     }
     if (element.closest("#" + HOST_ID)) return false;
     const text = element.innerText.trim();
-    return text.length > 0 && text.length < 220;
+    return text.length > 0 && text.length < 220 && rendered(element);
+  }
+
+  function rendered(element) {
+    const style = getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 1 && rect.height > 1;
+  }
+
+  function inViewport(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+  }
+
+  function visible(anchor) {
+    return anchor && rendered(anchor.element) && inViewport(anchor.element) ? anchor : null;
   }
 
   function decisionPoint() {
     const pattern = /add to cart|buy now|buy/i;
-    const button = Array.from(document.querySelectorAll("button, a")).find((element) =>
-      pattern.test(element.innerText)
+    const button = Array.from(document.querySelectorAll("button, a")).find(
+      (element) => pattern.test(element.innerText) && rendered(element) && inViewport(element)
     );
     if (button) return { element: button, pattern };
     const title = document.querySelector("h1");
-    return title ? { element: title, pattern: /\S[\s\S]*\S|\S/ } : null;
+    if (title && rendered(title)) return { element: title, pattern: /\S[\s\S]*\S|\S/ };
+    return null;
   }
 
   function readPrices(note) {
@@ -276,12 +302,7 @@
         mark.slash.style.width = rect.width + "px";
         mark.slash.style.height = rect.height + "px";
       }
-      const spot = beside(
-        clearance(mark.anchor, rect),
-        mark.chip,
-        used,
-        mark.listing ? textObstacles(mark.anchor) : []
-      );
+      const spot = beside(clearance(mark.anchor, rect), mark.chip, used, textObstacles(mark.anchor));
       mark.chip.style.left = spot.left + "px";
       mark.chip.style.top = spot.top + "px";
     });
@@ -370,9 +391,10 @@
       ".slash svg { width: 100%; height: 100%; overflow: visible; }",
       ".slash line { stroke: #9f2d20; stroke-width: 3; stroke-linecap: round; }",
       ".chip { position: fixed; width: max-content; max-width: 260px; pointer-events: auto;",
-      "font-family: Palatino, Georgia, serif; color: #1c1917; }",
+      "font-family: \"Avenir Next\", \"Segoe UI\", \"Gill Sans\", \"Trebuchet MS\", sans-serif; color: #1c1917; }",
       ".label { display: block; width: 100%; text-align: left; cursor: pointer;",
-      "background: #fffaf3; border: 1px solid #1c1917; border-radius: 2px;",
+      "background: #fffaf3; border: 1px solid #1c1917; border-radius: 14px;",
+      "box-shadow: 0 6px 16px rgba(28, 25, 23, 0.12);",
       "padding: 6px 8px; font: inherit; font-size: 14px; line-height: 1.35; color: inherit; }",
       ".label:disabled { cursor: default; }",
       ".card { margin-top: 4px; background: #fffaf3; border: 1px solid #1c1917;",
@@ -380,7 +402,8 @@
       ".card p { margin: 0 0 8px; }",
       ".close { font: inherit; font-size: 13px; background: transparent;",
       "border: 0; padding: 0; text-decoration: underline; cursor: pointer; color: inherit; }",
-      ".listing { width: 220px; background: #fffaf3; border: 1px solid #1c1917; }",
+      ".listing { width: 220px; background: #fffaf3; border: 1px solid #1c1917; border-radius: 16px;",
+      "overflow: hidden; box-shadow: 0 8px 18px rgba(28, 25, 23, 0.12); }",
       ".listing-link { display: grid; grid-template-columns: 72px 1fr; column-gap: 8px;",
       "row-gap: 2px; padding: 8px 8px 4px; color: inherit; text-decoration: none; }",
       ".listing img { width: 72px; height: 72px; object-fit: cover; grid-row: span 2; background: #efeae2; }",
@@ -395,27 +418,41 @@
     const dock = document.createElement("section");
     dock.className = "dock";
     dock.innerHTML =
-      '<div class="thread" hidden></div>' +
+      '<div class="panel" hidden>' +
+      '<p class="caption">Same agent as your calls and messages</p>' +
+      '<div class="sources" hidden><p class="sources-label">Sites checked</p><ul class="sources-list"></ul></div>' +
+      '<div class="thread"></div>' +
       '<form class="ask">' +
-      '<label class="caption" for="unmasked-question">Same agent as your calls and messages</label>' +
-      '<div class="row">' +
+      '<label class="visually-hidden" for="unmasked-question">Ask about this product</label>' +
       '<input id="unmasked-question" name="question" type="text" autocomplete="off" placeholder="Ask about this product">' +
       '<button type="submit">Send</button>' +
-      "</div></form>";
+      "</form></div>" +
+      '<button type="button" class="orb" aria-expanded="false" aria-controls="unmasked-question">Ask</button>';
+    const panel = dock.querySelector(".panel");
+    const orb = dock.querySelector(".orb");
     const thread = dock.querySelector(".thread");
     const form = dock.querySelector("form");
+    chatPanel = panel;
+    chatOrb = orb;
+    orb.addEventListener("click", () => setChatOpen(panel, orb, panel.hidden));
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const input = form.elements.question;
       const question = input.value.trim();
       if (!question) return;
-      thread.hidden = false;
+      setChatOpen(panel, orb, true);
       appendMessage(thread, "you", question);
       appendMessage(thread, "agent", answer(question));
       input.value = "";
       thread.scrollTop = thread.scrollHeight;
     });
     return dock;
+  }
+
+  function setChatOpen(panel, orb, open) {
+    panel.hidden = !open;
+    orb.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) panel.querySelector("input").focus();
   }
 
   function appendMessage(thread, role, text) {
@@ -429,6 +466,12 @@
     const text = question.toLowerCase();
     const product = productName();
     const price = currentNotes.find((note) => note.kind === "price");
+    if (/source|website|where did you|which site/.test(text) && currentVisits.length) {
+      return currentVisits
+        .slice(0, 6)
+        .map((visit) => visit.site + " (" + visit.reason + ")")
+        .join(", ");
+    }
     const listing = currentNotes.find((note) => note.kind === "recommendation");
     const concerns = currentNotes.filter((note) => note.kind === "concern" || note.kind === "product_info");
     if (price && /price|cost|tax|how much/.test(text)) return price.message;
@@ -473,25 +516,72 @@
   function chatStyle() {
     const element = document.createElement("style");
     element.textContent = [
-      ".dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);",
-      "width: min(560px, calc(100vw - 24px)); pointer-events: auto;",
-      "background: #fffaf3; border: 1px solid #1c1917; color: #1c1917;",
-      "font-family: Palatino, Georgia, serif; box-shadow: 0 8px 24px rgba(28, 25, 23, 0.12); }",
-      ".thread { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 8px;",
-      "padding: 12px 12px 0; }",
-      ".bubble { margin: 0; max-width: 85%; font-size: 14px; line-height: 1.4; padding: 8px 10px; }",
-      ".you { align-self: flex-end; background: #1c1917; color: #fffaf3; }",
-      ".agent { align-self: flex-start; background: #f4efe6; }",
-      ".ask { margin: 0; padding: 8px 12px 10px; }",
-      ".caption { display: block; font-size: 12px; letter-spacing: 0.02em; margin-bottom: 6px; }",
-      ".row { display: flex; gap: 8px; }",
-      ".ask input { flex: 1; min-width: 0; font: inherit; font-size: 15px; color: inherit;",
-      "background: transparent; border: 0; padding: 6px 0; }",
+      ".dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1;",
+      "display: flex; flex-direction: column; align-items: flex-end;",
+      "width: 100%; pointer-events: none;",
+      "font-family: \"Avenir Next\", \"Segoe UI\", \"Gill Sans\", \"Trebuchet MS\", sans-serif; color: #1c1917; }",
+      ".orb { width: 68px; height: 68px; margin: 12px 20px; border-radius: 50%; pointer-events: auto;",
+      "border: 1px solid rgba(28, 25, 23, 0.45);",
+      "background: rgba(255, 250, 243, 0.55); color: inherit; cursor: pointer;",
+      "backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);",
+      "box-shadow: 0 8px 24px rgba(28, 25, 23, 0.16); font: inherit; font-size: 15px; }",
+      ".panel[hidden] { display: none !important; }",
+      ".panel { width: 100%; max-height: 280px; display: flex; flex-direction: column;",
+      "box-sizing: border-box; pointer-events: auto; border-radius: 20px 20px 0 0;",
+      "border: 1px solid rgba(28, 25, 23, 0.35); border-bottom: 0;",
+      "background: rgba(255, 250, 243, 0.58);",
+      "backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);",
+      "box-shadow: 0 -8px 28px rgba(28, 25, 23, 0.12); }",
+      ".caption { margin: 0; padding: 12px 14px 0; font-size: 12px; }",
+      ".sources { max-height: 96px; overflow-y: auto; margin: 8px 14px 0; padding: 0; }",
+      ".sources-label { margin: 0 0 4px; font-size: 12px; }",
+      ".sources-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }",
+      ".sources-list li { font-size: 13px; line-height: 1.3; }",
+      ".sources-list a { color: inherit; }",
+      ".sources-list span { display: block; font-size: 11px; opacity: 0.75; }",
+      ".thread { max-height: 132px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;",
+      "padding: 10px 12px 0; }",
+      ".thread:empty { display: none; }",
+      ".bubble { margin: 0; max-width: 88%; font-size: 14px; line-height: 1.35; padding: 8px 10px; border-radius: 16px; }",
+      ".you { align-self: flex-end; background: rgba(28, 25, 23, 0.9); color: #fffaf3; }",
+      ".agent { align-self: flex-start; background: rgba(255, 250, 243, 0.72); }",
+      ".ask { display: flex; gap: 8px; align-items: center; margin: 0; padding: 10px 14px 14px; }",
+      ".ask input { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: inherit;",
+      "background: rgba(255, 255, 255, 0.86); border: 1px solid rgba(28, 25, 23, 0.28);",
+      "border-radius: 999px; padding: 11px 18px; }",
+      ".ask input:focus { outline: none; border-color: #1c1917; background: #fff;",
+      "box-shadow: 0 0 0 3px rgba(28, 25, 23, 0.12); }",
       ".ask button { font: inherit; font-size: 14px; background: #1c1917; color: #fffaf3;",
-      "border: 0; padding: 8px 12px; cursor: pointer; }",
+      "border: 0; border-radius: 999px; padding: 8px 12px; cursor: pointer; }",
+      ".visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;",
+      "overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }",
     ].join("\n");
     return element;
   }
 
-  window.UnmaskedOverlay = { show, clear, mountChat };
+  function showSources(visits) {
+    currentVisits = Array.isArray(visits) ? visits.filter((visit) => visit && visit.url) : [];
+    mountChat();
+    const element = document.getElementById(CHAT_ID);
+    if (!element) return;
+    const sources = element.shadowRoot.querySelector(".sources");
+    const list = element.shadowRoot.querySelector(".sources-list");
+    list.replaceChildren();
+    currentVisits.forEach((visit) => {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = visit.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = (visit.site || visit.url) + " — " + (visit.title || visit.url);
+      const reason = document.createElement("span");
+      reason.textContent = visit.reason || "";
+      item.append(link, reason);
+      list.appendChild(item);
+    });
+    sources.hidden = currentVisits.length === 0;
+    if (currentVisits.length && chatPanel && chatOrb) setChatOpen(chatPanel, chatOrb, true);
+  }
+
+  window.UnmaskedOverlay = { show, clear, mountChat, showSources };
 })();

@@ -105,3 +105,23 @@ def test_extract_skips_policy_links_that_cannot_be_read():
 
     assert {str(document.url).rstrip("/") for document in result.documents} == {RETURN_POLICY}
     assert "15% restocking fee" in result.page_text
+
+
+def test_extract_keeps_a_return_sentence_the_main_reader_skipped():
+    html = """
+        <html><body>
+          <div class="hero">Shop the collection.</div>
+          <p>Our standard return policy is 30 days for unworn items with the original tags attached.</p>
+        </body></html>
+    """
+
+    pages = {SOURCE: "<html><body><a href='/help/returns'>Return policy</a><p>Shop the collection.</p></body></html>", RETURN_POLICY: html}
+
+    result = FinePrintExtractor(
+        fetch=pages.get,
+        extract_html=lambda page: "Shop the collection.",
+    ).extract(SOURCE)
+
+    document = result.documents[0]
+    assert "30 days" in document.extracted_text
+    assert "30 days" not in result.page_text

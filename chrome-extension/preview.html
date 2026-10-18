@@ -27,6 +27,20 @@
   <script src="overlay.js"></script>
   <script>
     UnmaskedOverlay.mountChat();
+    UnmaskedOverlay.showSources([
+      {
+        site: "allbirds.com",
+        title: "Returns and exchanges",
+        url: "https://www.allbirds.com/pages/returns-exchanges",
+        reason: "Policy page"
+      },
+      {
+        site: "runrepeat.com",
+        title: "Allbirds Tree Runner review",
+        url: "https://runrepeat.com/allbirds-tree-runner",
+        reason: "Reviews of the seller's claim"
+      }
+    ]);
     UnmaskedOverlay.show([
       {
         kind: "price",

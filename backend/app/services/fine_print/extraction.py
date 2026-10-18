@@ -1,6 +1,8 @@
 """Policy document extraction for fine-print risk analysis."""
 
+import re
 from datetime import datetime, timezone
+from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import urldefrag, urljoin, urlparse
 
@@ -28,6 +30,10 @@ _POLICY_HINTS = (
     ("policy", 6),
 )
 _MAX_DOCUMENTS = 8
+_POLICY_LINE = re.compile(
+    r"\b(?:return|refund|exchange|warranty|restock|damage)\b",
+    re.IGNORECASE,
+)
 
 
 class _AnchorCollector(HTMLParser):
@@ -75,7 +81,7 @@ class FinePrintExtractor:
         if not html:
             raise RuntimeError(f"Failed to fetch URL: {url}")
 
-        page_text = _read_text(html, self._extract_html)
+        page_text = (self._extract_html(html) or "").strip()
         if not page_text:
             raise RuntimeError(f"Failed to extract text from URL: {url}")
 
@@ -113,8 +119,41 @@ def _extract_with_trafilatura(html: str) -> str:
 
 
 def _read_text(html: str, extract_html) -> str:
-    text = extract_html(html)
-    return text.strip() if text else ""
+    text = (extract_html(html) or "").strip()
+    missing = _missing_policy_sentences(html, text)
+    if missing:
+        text = f"{text}\n{missing}".strip()
+    return text
+
+
+def _missing_policy_sentences(html: str, extracted: str) -> str:
+    """Keep return and warranty sentences the main extractor skipped."""
+    known = " ".join(extracted.lower().split())
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", _plain_html(html)):
+        cleaned = " ".join(sentence.split())
+        if not _usable_policy_sentence(cleaned) or " ".join(cleaned.lower().split()) in known:
+            continue
+        kept.append(cleaned)
+    return " ".join(kept[:4])
+
+
+def _usable_policy_sentence(cleaned: str) -> bool:
+    if len(cleaned) < 36 or len(cleaned) > 320 or "|" in cleaned:
+        return False
+    if cleaned.startswith("---") or "hostname:" in cleaned or "fingerprint:" in cleaned:
+        return False
+    return _POLICY_LINE.search(cleaned) is not None
+
+
+def _plain_html(html: str) -> str:
+    without_code = re.sub(
+        r"<(script|style|noscript)\b[^>]*>.*?</\1>",
+        " ",
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", without_code)))
 
 
 def _policy_links(page_url: str, html: str) -> list[str]:
