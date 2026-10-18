@@ -96,16 +96,9 @@ def send_to_space(space_id: str, text: str, sender_id: str = "") -> dict:
     _load_local_env()
     project_id = os.environ.get("PHOTON_PROJECT_ID") or ""
     api_key = os.environ.get("PHOTON_API_KEY", "")
-    agent = (
-        sender_id
-        if str(sender_id).startswith("pho_usr_")
-        else (
-            os.environ.get("PHOTON_IMESSAGE_USER_ID")
-            or os.environ.get("PHOTON_AGENT_USER_ID")
-            or os.environ.get("PHOTON_USER_ID")
-            or ""
-        )
-    )
+    imessage_agent = os.environ.get("PHOTON_IMESSAGE_USER_ID") or ""
+    sms_agent = os.environ.get("PHOTON_AGENT_USER_ID") or os.environ.get("PHOTON_USER_ID") or ""
+    agent = sender_id if str(sender_id).startswith("pho_usr_") else (imessage_agent or sms_agent)
     if not api_key.startswith("pho_") or not project_id.startswith("pho_prj_") or not str(agent).startswith("pho_usr_"):
         return {
             "sent": False,
@@ -113,7 +106,19 @@ def send_to_space(space_id: str, text: str, sender_id: str = "") -> dict:
         }
     if not str(space_id).startswith("pho_spc_"):
         return {"sent": False, "reason": "The incoming text did not include a conversation id."}
-    return _send_message(project_id, api_key, agent, space_id, text)
+    sent = _send_message(project_id, api_key, agent, space_id, text)
+    if sent.get("sent"):
+        return sent
+    reason = str(sent.get("reason") or "").lower()
+    # Shared iMessage spaces reject the SMS agent; retry with the iMessage agent id.
+    if imessage_agent.startswith("pho_usr_") and imessage_agent != agent and (
+        "not sendable" in reason or "shared line" in reason
+    ):
+        retry = _send_message(project_id, api_key, imessage_agent, space_id, text)
+        if retry.get("sent"):
+            return retry
+        return retry
+    return sent
 
 
 def _sms_identity() -> tuple[str, str, str]:

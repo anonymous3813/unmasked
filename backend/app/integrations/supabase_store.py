@@ -498,7 +498,7 @@ def hydrate() -> None:
             if any(order.order_id == row["order_id"] for order in shopper.past_orders(user_id)):
                 continue
         except KeyError:
-            shopper.open_profile(user_id, "")
+            shopper.open_profile(user_id, "unknown")
         ordered_at = row["ordered_at"]
         if isinstance(ordered_at, str):
             ordered_at = datetime.fromisoformat(ordered_at)
