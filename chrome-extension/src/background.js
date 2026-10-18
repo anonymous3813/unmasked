@@ -1,6 +1,7 @@
 /* Ask the shop API for marks, then hand them to the product page. */
 
-const API = "https://unmasked.fastapicloud.dev";
+/* Local API (same Supabase-backed process Photon should webhook into). */
+const API = "http://127.0.0.1:8000";
 
 function callApi(path, body) {
   return new Promise((resolve) => {

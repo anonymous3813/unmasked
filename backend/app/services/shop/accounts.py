@@ -70,6 +70,19 @@ def user_by_phone(phone: str) -> dict | None:
     return None
 
 
+def user_by_id(user_id: str) -> dict | None:
+    """Return a signed-in account by id."""
+    user = _users.get(user_id or "")
+    if not user:
+        return None
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "phone": user.get("phone") or "",
+    }
+
+
 def logout(authorization: str | None) -> dict:
     """Forget the session that sent this request."""
     token = _token(authorization or "")

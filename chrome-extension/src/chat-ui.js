@@ -830,12 +830,17 @@
   }
 
   function MenuSheet({ state, actions }) {
+    const who = state.account && (state.account.name || state.account.email) ? state.account.name || state.account.email : "";
     return h(
       "div",
       { className: "sheet menu", role: "menu" },
+      who ? h("p", { className: "sheet-title" }, who) : null,
       h("button", { type: "button", "aria-pressed": state.inboxMode ? "false" : "true", onClick: () => actions.setInbox(false) }, "This page"),
       h("button", { type: "button", "aria-pressed": state.inboxMode ? "true" : "false", onClick: () => actions.setInbox(true) }, "Messages"),
-      h("button", { type: "button", onClick: actions.startCall }, "Call")
+      h("button", { type: "button", onClick: actions.startCall }, "Call"),
+      state.account
+        ? h("button", { type: "button", onClick: actions.signOut }, "Sign out")
+        : null
     );
   }
 

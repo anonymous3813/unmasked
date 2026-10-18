@@ -167,6 +167,19 @@
       state.authError = "";
       render();
     },
+    signOut() {
+      state.menu = false;
+      const leave = window.UnmaskedOverlay && window.UnmaskedOverlay.signOut;
+      if (typeof leave !== "function") {
+        showSignedOut();
+        return;
+      }
+      Promise.resolve(leave())
+        .catch(() => null)
+        .then(() => {
+          showSignedOut();
+        });
+    },
     signIn(form) {
       const sign = window.UnmaskedOverlay && window.UnmaskedOverlay.signIn;
       state.authError = "";

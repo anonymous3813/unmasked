@@ -8,6 +8,25 @@ import urllib.request
 from backend.app.integrations.gemini_client import _load_local_env
 
 
+def _product_payload(raw: str) -> dict:
+    start = (raw or "").find("{")
+    end = (raw or "").rfind("}")
+    if start == -1 or end <= start:
+        return {}
+    try:
+        payload = json.loads(raw[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "name": str(payload.get("name") or "").strip()[:120],
+        "brand": str(payload.get("brand") or "").strip()[:80],
+        "kind": str(payload.get("kind") or "").strip()[:60],
+        "query": str(payload.get("query") or "").strip()[:120],
+    }
+
+
 class OpenAIClient:
     """Chat completion client. ``OPENAI_API_KEY`` authenticates. ``OPENAI_MODEL`` overrides the model."""
 
@@ -121,3 +140,57 @@ class OpenAIClient:
             max_tokens=700,
             json_object=False,
         )
+
+    def identify_product(self, data: bytes, mime: str = "image/jpeg") -> dict:
+        """Name a retail product in a shopper photo for store search."""
+        import base64
+
+        from backend.app.services.shop.photo import prepare_image
+
+        _load_local_env()
+        api_key = os.environ.get(self.api_key_env)
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+        model = os.environ.get(self.model_env) or self.default_model
+        data, media = prepare_image(data, mime)
+        if not data:
+            return {}
+        if len(data) > 4_500_000:
+            data = data[:4_500_000]
+        encoded = base64.b64encode(data).decode("ascii")
+        media = media if str(media or "").startswith("image/") else "image/jpeg"
+        prompt = (
+            "This is a shopper photo. Identify the retail product for shopping search. "
+            "Do not identify people, faces, or private documents. "
+            "If it is not a clear product, leave query empty. "
+            'Return JSON: {"name":"product name","brand":"brand or empty","kind":"short kind",'
+            '"query":"3-8 word store search query"}'
+        )
+        messages = [
+            {"role": "system", "content": "Return one JSON object and no other text."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{media};base64,{encoded}"}},
+                ],
+            },
+        ]
+        raw = ""
+        try:
+            raw = self._chat(api_key, model, messages, max_tokens=400, json_object=True)
+        except RuntimeError:
+            try:
+                raw = self._chat(api_key, model, messages, max_tokens=400, json_object=False)
+            except RuntimeError:
+                raw = ""
+        parsed = _product_payload(raw)
+        if parsed.get("query") or parsed.get("name"):
+            return parsed
+        # Gemini often accepts the same JPEG when OpenAI vision is picky.
+        try:
+            from backend.app.integrations.gemini_client import identify_product_image
+
+            return identify_product_image(data, media)
+        except Exception:
+            return parsed

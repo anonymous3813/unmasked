@@ -8,7 +8,8 @@ from backend.app.integrations.tavily_client import TavilyClient
 from backend.app.services.catalog.identity import known_kind
 
 _ASK = re.compile(
-    r"\b(?:find|show|get|search(?: for)?|look for)\s+(?:me\s+)?(?:an?\s+|some\s+)?([a-z][a-z0-9\- ]{1,40})",
+    r"\b(?:find|show|get|search(?: for)?|look for|buy|shop for|where else (?:can i |to )?buy)\s+"
+    r"(?:me\s+)?(?:an?\s+|some\s+|a\s+)?([a-z][a-z0-9\- ]{1,40})",
     re.IGNORECASE,
 )
 _WHAT = re.compile(

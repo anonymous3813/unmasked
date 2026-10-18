@@ -47,6 +47,8 @@ class PastOrder(BaseModel):
     materials: str = ""
     delivery_status: str = "Placed"
     notified_status: str = ""
+    delivery_date: datetime | None = None
+    notified_delivery_date: str = ""
     fine_print: FinePrintOrderContext | None = None
 
 

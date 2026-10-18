@@ -138,6 +138,10 @@ def _conn():
         )
         _connection.execute("alter table unmasked_users add column if not exists phone text not null default ''")
         _connection.execute("alter table unmasked_orders add column if not exists user_id text not null default ''")
+        _connection.execute("alter table unmasked_orders add column if not exists delivery_date timestamptz")
+        _connection.execute(
+            "alter table unmasked_orders add column if not exists notified_delivery_date text not null default ''"
+        )
         _connection.execute("alter table unmasked_receipts add column if not exists user_id text not null default ''")
         _connection.execute(
             """
@@ -226,14 +230,21 @@ def save_order(order, user_id: str = "") -> None:
             """
             insert into unmasked_orders (
                 order_id, product_name, product_url, store, price,
-                environment_score, materials, delivery_status, notified_status, ordered_at, user_id
-            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                environment_score, materials, delivery_status, notified_status, ordered_at, user_id,
+                delivery_date, notified_delivery_date
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             on conflict (order_id) do update set
+                product_name = excluded.product_name,
+                product_url = excluded.product_url,
+                store = excluded.store,
+                price = excluded.price,
                 delivery_status = excluded.delivery_status,
                 notified_status = excluded.notified_status,
                 environment_score = excluded.environment_score,
                 materials = excluded.materials,
-                user_id = excluded.user_id
+                user_id = excluded.user_id,
+                delivery_date = excluded.delivery_date,
+                notified_delivery_date = excluded.notified_delivery_date
             """,
             (
                 order.order_id,
@@ -247,9 +258,17 @@ def save_order(order, user_id: str = "") -> None:
                 order.notified_status,
                 order.ordered_at,
                 user_id,
+                getattr(order, "delivery_date", None),
+                getattr(order, "notified_delivery_date", "") or "",
             ),
         )
+        if not connection.autocommit:
+            connection.commit()
     except Exception:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
         return
 
 
@@ -261,7 +280,8 @@ def load_orders() -> list[dict]:
         rows = connection.execute(
             """
             select order_id, product_name, product_url, store, price, environment_score,
-                   materials, delivery_status, notified_status, ordered_at, user_id
+                   materials, delivery_status, notified_status, ordered_at, user_id,
+                   delivery_date, notified_delivery_date
             from unmasked_orders order by ordered_at
             """
         ).fetchall()
@@ -282,6 +302,8 @@ def load_orders() -> list[dict]:
                 "notified_status": row[8] or "",
                 "ordered_at": row[9],
                 "user_id": row[10] if len(row) > 10 else "",
+                "delivery_date": row[11] if len(row) > 11 else None,
+                "notified_delivery_date": (row[12] if len(row) > 12 else "") or "",
             }
         )
     return loaded
@@ -411,13 +433,21 @@ def save_user(user: dict) -> None:
             """
             insert into unmasked_users (id, email, name, password, created_at, phone)
             values (%s, %s, %s, %s, %s, %s)
-            on conflict (id) do update set phone = excluded.phone
+            on conflict (id) do update set
+                email = excluded.email,
+                name = excluded.name,
+                password = excluded.password,
+                phone = excluded.phone
             """,
             (user["id"], user["email"], user["name"], user["password"], user["createdAt"], user.get("phone") or ""),
         )
-        connection.commit()
+        if not connection.autocommit:
+            connection.commit()
     except Exception:
-        connection.rollback()
+        try:
+            connection.rollback()
+        except Exception:
+            pass
 
 
 def save_session(digest: str, user_id: str) -> None:
@@ -502,6 +532,9 @@ def hydrate() -> None:
         ordered_at = row["ordered_at"]
         if isinstance(ordered_at, str):
             ordered_at = datetime.fromisoformat(ordered_at)
+        delivery_date = row.get("delivery_date")
+        if isinstance(delivery_date, str) and delivery_date:
+            delivery_date = datetime.fromisoformat(delivery_date)
         shopper.add_order(
             user_id,
             PastOrder(
@@ -515,6 +548,8 @@ def hydrate() -> None:
                 materials=row["materials"] or "",
                 delivery_status=row["delivery_status"],
                 notified_status=row["notified_status"],
+                delivery_date=delivery_date,
+                notified_delivery_date=row.get("notified_delivery_date") or "",
                 fine_print=FinePrintOrderContext(price=row["price"] or "", checked_at=ordered_at),
             ),
         )

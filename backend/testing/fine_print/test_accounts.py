@@ -110,7 +110,10 @@ def test_an_inbound_text_is_read_from_the_photon_event(monkeypatch):
 
 def test_a_photo_with_a_caption_is_answered(monkeypatch):
     from backend.app.main import _receive_sms
+    from backend.app.services.shop.accounts import register, reset
 
+    reset()
+    register("photo@example.com", "correct-horse", "Pat", "+12065550100")
     captured = {}
 
     def send(space_id: str, text: str, sender_id: str = "") -> dict:
@@ -118,7 +121,23 @@ def test_a_photo_with_a_caption_is_answered(monkeypatch):
         return {"sent": True}
 
     monkeypatch.setattr("backend.app.integrations.photon_line.send_to_space", send)
-    monkeypatch.setattr("backend.app.services.shop.agent.answer_question", lambda *args, **kwargs: "That looks like a jacket.")
+    monkeypatch.setattr(
+        "backend.app.integrations.photon_line.download_attachment",
+        lambda attachment_id: (b"\xff\xd8\xff" + b"fake-image-bytes", "image/jpeg"),
+    )
+    monkeypatch.setattr(
+        "backend.app.integrations.openai_client.OpenAIClient.identify_product",
+        lambda self, data, mime="image/jpeg": {
+            "name": "Patagonia Torrentshell",
+            "brand": "Patagonia",
+            "kind": "jacket",
+            "query": "Patagonia Torrentshell jacket",
+        },
+    )
+    monkeypatch.setattr(
+        "backend.app.services.shop.updates._product_search_answer",
+        lambda question, profile: "Live listings: jacket\n\n1. Patagonia\n   Torrentshell\n   $179",
+    )
     _receive_sms({
         "data": {
             "object": {
@@ -126,7 +145,7 @@ def test_a_photo_with_a_caption_is_answered(monkeypatch):
                     "type": "group",
                     "parts": [
                         {"type": "text", "text": "is this the jacket"},
-                        {"type": "attachment", "attachmentId": "pho_att_photo"},
+                        {"type": "attachment", "attachmentId": "pho_att_7zzzzzzzzzzzzzzzzzzzzzzzz"},
                     ],
                 },
                 "sentBy": {"handle": "+12065550100", "kind": "human"},
@@ -136,7 +155,9 @@ def test_a_photo_with_a_caption_is_answered(monkeypatch):
         }
     })
 
-    assert captured["text"].startswith("I received the picture.")
+    assert "From your photo" in captured["text"]
+    assert "Torrentshell" in captured["text"]
+    assert "Live listings" in captured["text"]
 
 
 def test_the_agents_own_text_is_not_answered(monkeypatch):
