@@ -1,9 +1,10 @@
 """Claim verdicts plus recommendations drawn from the same review evidence."""
 
 import json
+import re
 from datetime import datetime, timezone
 
-from backend.app.integrations.groq_client import GroqClient
+from backend.app.integrations.gemini_client import GeminiClient
 from backend.app.integrations.tavily_client import TavilyClient
 from backend.app.models.claim_validation import (
     ClaimAnalysis,
@@ -16,6 +17,7 @@ from backend.app.models.claim_validation import (
 from backend.app.services.claim_validation.validation import ClaimValidationService
 
 _ASPECTS = {aspect.value: aspect for aspect in ComparisonAspect}
+_PRICE = re.compile(r"\$\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{2}))?")
 _ASPECT_QUERIES = (
     (ComparisonAspect.ENVIRONMENTAL, "environmentally friendly alternatives"),
     (ComparisonAspect.COST_VALUE, "best value alternatives"),
@@ -51,7 +53,7 @@ class ClaimAnalysisService:
                 analyzed_at=analyzed_at,
             )
 
-        complete = self._complete or GroqClient().complete
+        complete = self._complete or GeminiClient().complete
         recommendations = _recommendations(
             complete(_prompt(product_name, validations, evidence)),
             evidence,
@@ -75,6 +77,7 @@ def _alternative_reviews(search, product_name: str) -> list[ClaimEvidence]:
             url = str(hit.get("url") or "").strip()
             quotation = str(hit.get("content") or "").strip()
             title = str(hit.get("title") or url).strip()
+            image_url = _image_url(hit)
             if not url or not quotation or not title or url in seen:
                 continue
             seen.add(url)
@@ -84,6 +87,7 @@ def _alternative_reviews(search, product_name: str) -> list[ClaimEvidence]:
                     title=title,
                     quotation=quotation,
                     retrieved_at=retrieved_at,
+                    image_url=image_url,
                 )
             )
     return evidence
@@ -152,6 +156,8 @@ def _recommendations(
             or name.lower() == product_name.lower()
             or quotation not in source.quotation
             or name.lower() not in source.quotation.lower()
+            or source.image_url is None
+            or _listed_price(source.quotation) is None
         ):
             continue
         kept.append(
@@ -161,6 +167,28 @@ def _recommendations(
                 reason=reason,
                 source_url=source.source_url,
                 evidence_quotation=quotation,
+                product_url=source.source_url,
+                image_url=source.image_url,
+                price=_listed_price(source.quotation),
             )
         )
     return kept
+
+
+def _image_url(hit: dict) -> str | None:
+    image = hit.get("image") or hit.get("image_url")
+    if not image and isinstance(hit.get("images"), list) and hit["images"]:
+        image = hit["images"][0]
+    image = str(image or "").strip()
+    if image.startswith("https://") or image.startswith("http://"):
+        return image
+    return None
+
+
+def _listed_price(text: str) -> str | None:
+    match = _PRICE.search(text)
+    if match is None:
+        return None
+    dollars = match.group(1).replace(",", "")
+    cents = match.group(2) or "00"
+    return f"{dollars}.{cents}"

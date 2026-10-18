@@ -38,6 +38,7 @@ class ClaimEvidence(BaseModel):
     title: str = Field(min_length=1)
     quotation: str = Field(min_length=1)
     retrieved_at: datetime
+    image_url: HttpUrl | None = None
 
 
 class ClaimValidationResult(BaseModel):
@@ -58,6 +59,9 @@ class ProductRecommendation(BaseModel):
     reason: str = Field(min_length=1)
     source_url: HttpUrl
     evidence_quotation: str = Field(min_length=1)
+    product_url: HttpUrl
+    image_url: HttpUrl
+    price: str = Field(min_length=1)
 
 
 class ClaimAnalysis(BaseModel):

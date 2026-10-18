@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from backend.app.integrations.groq_client import GroqClient
+from backend.app.integrations.gemini_client import GeminiClient
 from backend.app.integrations.supabase_client import SupabaseClient
 from backend.app.integrations.tavily_client import TavilyClient
 from backend.app.models.claim_validation import (
@@ -26,14 +26,14 @@ def test_claim_validation_scaffolds_instantiate_without_external_calls():
     search = TavilySearchService()
     validator = ClaimValidationService()
     tavily = TavilyClient()
-    groq = GroqClient()
+    gemini = GeminiClient()
     supabase = SupabaseClient()
 
     assert isinstance(search, TavilySearchService)
     assert isinstance(validator, ClaimValidationService)
     assert isinstance(tavily, TavilyClient)
     assert tavily.api_key_env == "TAVILY_API_KEY"
-    assert groq.api_key_env == "GROQ_API_KEY"
+    assert gemini.api_key_env == "GEMINI_API_KEY"
     assert supabase.url_env == "SUPABASE_URL"
     assert supabase.key_env == "SUPABASE_KEY"
 

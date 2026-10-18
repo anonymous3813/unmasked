@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Alpine Jacket</title>
+  <style>
+    body { margin: 0; font-family: Georgia, serif; color: #1c1917; background: #f4f1ea; }
+    main { max-width: 640px; margin: 48px auto 120vh; padding: 0 24px 80vh; }
+    h1 { font-weight: 500; font-size: 40px; margin-bottom: 8px; }
+    .price { font-size: 28px; margin: 0 0 16px; }
+    button { font: inherit; font-size: 16px; padding: 10px 16px; background: #1c1917; color: #fffaf3; border: 0; }
+    .shipping { margin-top: 24px; }
+    .later { margin-top: 90vh; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Alpine Jacket</h1>
+    <p class="price">$120.00</p>
+    <button type="button">Add to cart</button>
+    <p class="shipping">Free shipping on orders over $50.</p>
+    <section class="later">
+      <h2>Shipping damage</h2>
+      <p>Report damage after the package arrives.</p>
+    </section>
+  </main>
+  <script src="overlay.js"></script>
+  <script>
+    UnmaskedOverlay.mountChat();
+    UnmaskedOverlay.show([
+      {
+        kind: "price",
+        title: "Price with tax",
+        message: "The page shows USD 120.00. Sales tax of 8.5% is not included. With tax, the price is USD 130.20."
+      },
+      {
+        kind: "concern",
+        title: "Return limit",
+        message: "This product can only be returned the first week. Items must be unworn."
+      },
+      {
+        kind: "concern",
+        title: "Damage policy",
+        message: "Unreported shipping damage becomes the shopper's bill. Report shipping damage within 48 hours."
+      },
+      {
+        kind: "recommendation",
+        aspect: "cost_value",
+        title: "Ridge Coat",
+        message: "A better value than this jacket.",
+        productUrl: "https://shop.example/products/ridge-coat",
+        imageUrl: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Crect width='72' height='72' fill='%23d7c4a3'/%3E%3Cpath d='M16 28 L36 18 L56 28 L50 58 L22 58 Z' fill='%231c1917'/%3E%3C/svg%3E",
+        price: "90.00"
+      }
+    ]);
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timezone
 
-from backend.app.integrations.groq_client import GroqClient
+from backend.app.integrations.gemini_client import GeminiClient
 from backend.app.models.claim_validation import (
     ClaimEvidence,
     ClaimValidationResult,
@@ -18,9 +18,9 @@ _VERDICTS = {verdict.value: verdict for verdict in ClaimVerdict}
 class ClaimValidationService:
     """Compare a seller's claim with reviews found through Tavily.
 
-    Groq reads the claim and the review snippets and returns supported,
+    Gemini reads the claim and the review snippets and returns supported,
     contradicted, or inconclusive. With no reviews, the result is inconclusive
-    and Groq is not called.
+    and Gemini is not called.
     """
 
     def __init__(self, search=None, complete=None) -> None:
@@ -40,7 +40,7 @@ class ClaimValidationService:
                 validated_at=validated_at,
             )
 
-        complete = self._complete or GroqClient().complete
+        complete = self._complete or GeminiClient().complete
         verdict, explanation = _comparison(complete(_prompt(claim, evidence)))
         return ClaimValidationResult(
             claim=claim,

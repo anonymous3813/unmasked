@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
-from backend.app.integrations.groq_client import GroqClient
+from backend.app.integrations.gemini_client import GeminiClient
 from backend.app.models.fine_print import (
     FinePrintAnalysisResult,
     FinePrintExtraction,
@@ -57,12 +57,12 @@ _TAX_INCLUDED_PHRASES = (
 )
 
 
-class GroqFieldReader:
-    """Read policy and price fields with Groq.
+class GeminiFieldReader:
+    """Read policy and price fields with Gemini.
 
-    Groq quotes return limits, fees, cancellation terms, warranty exclusions,
+    Gemini quotes return limits, fees, cancellation terms, warranty exclusions,
     damage liability, the listed price, and any stated tax rate. Configure
-    ``GROQ_API_KEY`` in the environment or ``backend/.env``.
+    ``GEMINI_API_KEY`` in the environment or ``backend/.env``.
     """
 
     def __init__(self, complete=None) -> None:
@@ -70,14 +70,14 @@ class GroqFieldReader:
 
     def analyze_document(self, text: str) -> dict[str, str]:
         """Return exact quotations for the fine-print fields found in one text."""
-        complete = self._complete or GroqClient().complete
+        complete = self._complete or GeminiClient().complete
         return _fields_from_response(complete(_field_prompt(text)), text)
 
 
 class FinePrintAnalyzer:
     """Find policy concerns and the tax-inclusive price the product page hides.
 
-    Groq reads each extracted document for return limits, fees, cancellation
+    Gemini reads each extracted document for return limits, fees, cancellation
     terms, warranty exclusions, damage liability, the listed price, and any
     stated tax rate. A concern is kept only when its quotation is in the
     source text and is not already on the product page.
@@ -88,7 +88,7 @@ class FinePrintAnalyzer:
 
     def analyze(self, extraction: FinePrintExtraction) -> FinePrintAnalysisResult:
         """Return buried policy concerns and the tax-inclusive price."""
-        analyze_document = self._analyze_document or GroqFieldReader().analyze_document
+        analyze_document = self._analyze_document or GeminiFieldReader().analyze_document
         fields = _collected_fields(extraction, analyze_document)
         return FinePrintAnalysisResult(
             document=PolicyDocument(

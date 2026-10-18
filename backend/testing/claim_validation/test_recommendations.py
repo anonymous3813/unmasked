@@ -18,11 +18,12 @@ LEAK = {
 }
 ALTERNATIVE = {
     "title": "Jacket comparison",
-    "url": "https://reviews.example/ridge-coat",
+    "url": "https://shop.example/products/ridge-coat",
     "content": (
         "The Ridge Coat uses recycled polyester and is a better value "
-        "than the Alpine Jacket."
+        "than the Alpine Jacket. It costs $90.00."
     ),
+    "image": "https://images.example/ridge-coat.jpg",
 }
 
 
@@ -91,6 +92,10 @@ def test_recommends_products_the_reviews_support():
         ComparisonAspect.COST_VALUE,
     }
     assert {item.product_name for item in analysis.recommendations} == {"Ridge Coat"}
+    listing = analysis.recommendations[0]
+    assert listing.price == "90.00"
+    assert str(listing.product_url).rstrip("/") == ALTERNATIVE["url"]
+    assert str(listing.image_url).rstrip("/") == ALTERNATIVE["image"]
     assert any("environmentally friendly" in query for query in queries)
     assert any("best value" in query for query in queries)
     assert any("durable" in query for query in queries)
@@ -112,4 +117,40 @@ def test_skips_recommendations_when_no_alternatives_are_found():
     analysis = ClaimAnalysisService(search=search, complete=complete).analyze([CLAIM])
 
     assert analysis.validations[0].verdict is ClaimVerdict.CONTRADICTED
+    assert analysis.recommendations == []
+
+
+def test_skips_a_listing_without_a_picture_or_price():
+    def search(query: str) -> list[dict]:
+        if CLAIM.claim_text in query:
+            return [LEAK]
+        return [
+            {
+                "title": "Plain comparison",
+                "url": "https://reviews.example/plain-coat",
+                "content": "The Plain Coat is a better value than the Alpine Jacket.",
+            }
+        ]
+
+    def complete(prompt: str) -> str:
+        if "Recommend alternative products" in prompt:
+            return json.dumps(
+                {
+                    "recommendations": [
+                        {
+                            "product_name": "Plain Coat",
+                            "aspect": "cost_value",
+                            "reason": "Reviewers call it a better value.",
+                            "source_url": "https://reviews.example/plain-coat",
+                            "evidence_quotation": "The Plain Coat is a better value",
+                        }
+                    ]
+                }
+            )
+        return json.dumps(
+            {"verdict": "contradicted", "explanation": "A review says the jacket leaked."}
+        )
+
+    analysis = ClaimAnalysisService(search=search, complete=complete).analyze([CLAIM])
+
     assert analysis.recommendations == []

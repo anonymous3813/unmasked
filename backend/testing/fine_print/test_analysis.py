@@ -97,18 +97,18 @@ def test_analyze_skips_the_tax_price_when_the_page_already_shows_it():
     assert result.price is None
 
 
-def test_env_file_supplies_groq_settings(tmp_path, monkeypatch):
+def test_env_file_supplies_gemini_settings(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
-    env_file.write_text('GROQ_API_KEY="local-test-key"\n', encoding="utf-8")
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    env_file.write_text('GEMINI_API_KEY="local-test-key"\n', encoding="utf-8")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
     _load_env_file(env_file)
 
-    assert os.environ["GROQ_API_KEY"] == "local-test-key"
+    assert os.environ["GEMINI_API_KEY"] == "local-test-key"
 
 
-def test_groq_reader_keeps_only_quotations_from_the_document():
-    from backend.app.services.fine_print.analysis import GroqFieldReader
+def test_gemini_reader_keeps_only_quotations_from_the_document():
+    from backend.app.services.fine_print.analysis import GeminiFieldReader
 
     text = "Opened items incur a 15% restocking fee."
 
@@ -119,6 +119,6 @@ def test_groq_reader_keeps_only_quotations_from_the_document():
             '"ListedPrice": "$999"}'
         )
 
-    fields = GroqFieldReader(complete=complete).analyze_document(text)
+    fields = GeminiFieldReader(complete=complete).analyze_document(text)
 
     assert fields == {"RestockingFee": "Opened items incur a 15% restocking fee."}
