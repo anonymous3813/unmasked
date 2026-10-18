@@ -9,10 +9,13 @@ from backend.app.models.agent import (
     PastOrder,
 )
 from backend.app.models.claim_validation import (
+    ClaimAnalysis,
     ClaimEvidence,
     ClaimValidationResult,
     ClaimVerdict,
+    ComparisonAspect,
     ProductClaim,
+    ProductRecommendation,
 )
 from backend.app.models.fine_print import (
     FinePrintAnalysisResult,
@@ -30,7 +33,9 @@ __all__ = [
     "AgentCall",
     "AgentMessage",
     "AgentProfile",
+    "ClaimAnalysis",
     "ClaimEvidence",
+    "ComparisonAspect",
     "ContactPurpose",
     "FinePrintOrderContext",
     "PastOrder",
@@ -43,6 +48,7 @@ __all__ = [
     "ProductNotification",
     "PriceWithTax",
     "ProductClaim",
+    "ProductRecommendation",
     "RiskCategory",
     "RiskFinding",
     "Severity",
